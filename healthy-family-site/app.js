@@ -1,4 +1,4 @@
-const APP_VERSION = '0.4.2';
+const APP_VERSION = '0.4.4';
 const app = document.getElementById('app');
 
 // ---------- утилиты ----------
@@ -27,8 +27,8 @@ async function api(action, payload) {
   if (!settings.apiUrl) throw new Error('Не указан адрес сервера распознавания. Откройте «Настройки».');
   const r = await fetch(settings.apiUrl, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + settings.apiToken },
-    body: JSON.stringify({ action, ...payload })
+    headers: { 'Content-Type': 'application/json', 'X-Access-Code': settings.apiToken },
+    body: JSON.stringify({ action, ...payload, code: settings.apiToken })
   });
   const data = await r.json().catch(() => ({}));
   if (r.status === 401) throw new Error('Код доступа не принят. Проверьте его в «Настройках».');

@@ -37,8 +37,8 @@ const Extract = (() => {
   }
 
   async function pdf(file) {
-    await loadScript('lib/pdf.min.js');
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'lib/pdf.worker.min.js';
+    await loadScript('pdf.min.js');
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'pdf.worker.min.js';
     const data = await file.arrayBuffer();
     let doc;
     try { doc = await pdfjsLib.getDocument({ data: data.slice(0) }).promise; }
@@ -80,13 +80,13 @@ const Extract = (() => {
   }
 
   async function docx(file) {
-    await loadScript('lib/mammoth.browser.min.js');
+    await loadScript('mammoth.browser.min.js');
     const r = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
     return { text: r.value };
   }
 
   async function sheet(file) {
-    await loadScript('lib/xlsx.full.min.js');
+    await loadScript('xlsx.full.min.js');
     const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
     return { text: wb.SheetNames.map(n => '# ' + n + '\n' + XLSX.utils.sheet_to_csv(wb.Sheets[n], { FS: ' ; ' })).join('\n\n') };
   }

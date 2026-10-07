@@ -1,10 +1,10 @@
 // Офлайн-оболочка приложения. При выпуске новой версии меняйте VERSION.
-const VERSION = 'v0.4.2';
+const VERSION = 'v0.4.4';
 const SHARE_CACHE = 'share-inbox'; // файлы, пришедшие через «Поделиться»
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'db.js', 'metrics.js', 'extract.js', 'anamnesis.js', 'mailbox.js', 'iddocs.js', 'icd10.json', 'icd10-aliases.json',
   'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png',
-  'lib/dexie.min.js', 'lib/pdf.min.js', 'lib/pdf.worker.min.js', 'lib/mammoth.browser.min.js', 'lib/xlsx.full.min.js',
-  'fonts/onest-cyrillic-400-normal.woff2', 'fonts/onest-cyrillic-500-normal.woff2', 'fonts/onest-cyrillic-600-normal.woff2', 'fonts/onest-cyrillic-700-normal.woff2'];
+  'dexie.min.js', 'pdf.min.js', 'pdf.worker.min.js', 'mammoth.browser.min.js', 'xlsx.full.min.js',
+  'onest-cyrillic-400-normal.woff2', 'onest-cyrillic-500-normal.woff2', 'onest-cyrillic-600-normal.woff2', 'onest-cyrillic-700-normal.woff2'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(VERSION).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
