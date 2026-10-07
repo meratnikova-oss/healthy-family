@@ -1,4 +1,4 @@
-const APP_VERSION = '0.4.5';
+const APP_VERSION = '0.5.0';
 const app = document.getElementById('app');
 
 // ---------- утилиты ----------
@@ -99,9 +99,10 @@ async function viewOnboarding() {
     <div class="top"><h1>Healthy Family</h1></div>
     <div class="pad stack">
       <p class="sub" style="font-size:15px">Архив анализов и медицинских документов для вас и семьи. Всё хранится на этом телефоне.</p>
+      ${Install.card()}
       ${profileForm('Создать профиль')}
     </div>`;
-  bindProfileForm();
+  bindProfileForm(); Install.bind();
 }
 
 function profileForm(cta) {
@@ -180,6 +181,7 @@ async function viewHome() {
     <a class="fab" href="#/upload">+ Загрузить</a>
     ${nav('home')}`;
   bindProfileChips();
+  if (!Install.standalone) { $('.pad.stack').insertAdjacentHTML('afterbegin', Install.card()); Install.bind(); }
   expiringDocs().then(async docs => {
     if (!docs.length || !$('.pad.stack')) return;
     const names = Object.fromEntries((await db.profiles.toArray()).map(x => [x.id, x.name]));
@@ -626,6 +628,7 @@ async function viewSettings() {
         ${profiles.map(x => `<a class="between" href="#/profile/${x.id}" style="text-decoration:none;color:inherit;min-height:40px;align-items:center"><span>${esc(x.name)}</span><span class="sub">${x.kind === 'pet' ? 'питомец' : x.kind === 'child' ? 'ребёнок' : 'взрослый'} · анамнез ›</span></a>`).join('')}
         <a class="btn ghost" href="#/profile/new">Добавить профиль</a>
       </section>
+      <button type="button" class="btn ghost" id="checkupd">Проверить обновления</button>
       <p class="sub" style="text-align:center">Версия ${APP_VERSION} · схема базы ${db.verno}</p>
     </div>
     ${nav('settings')}`;
@@ -650,6 +653,15 @@ async function viewSettings() {
   };
   const ps = $('#persist');
   if (ps) ps.onclick = async () => { const ok = await navigator.storage.persist(); toast(ok ? 'Защита включена' : 'Браузер пока не разрешил'); viewSettings(); };
+  $('#checkupd').onclick = async () => {
+    toast('Проверяю…');
+    try {
+      const r = await fetch('app.js', { cache: 'no-store' }); const t = await r.text();
+      const v = (t.match(/APP_VERSION = '([^']+)'/) || [])[1];
+      if (v && v !== APP_VERSION) { toast('Найдена версия ' + v + ', обновляю…'); if (swReg) await swReg.update(); setTimeout(() => location.reload(), 1500); }
+      else toast('У вас последняя версия ' + APP_VERSION);
+    } catch (e) { toast('Нет интернета — проверьте позже'); }
+  };
   $('#export').onclick = async () => {
     toast('Готовлю архив…');
     const blob = await exportAll();
@@ -694,9 +706,68 @@ async function render() {
 }
 window.addEventListener('hashchange', render);
 
+// ---------- установка и обновления ----------
+const Install = {
+  prompt: null,
+  get standalone() { return matchMedia('(display-mode: standalone)').matches || navigator.standalone === true; },
+  get platform() {
+    const ua = navigator.userAgent;
+    if (/iPhone|iPad|iPod/.test(ua)) return 'ios';
+    if (/Android/.test(ua)) {
+      if (/SamsungBrowser|YaBrowser|YaApp|OPR|Firefox|Telegram|Instagram|FBAN|FBAV|VKAndroidApp|; wv\)/.test(ua)) return 'android-other';
+      return 'android-chrome';
+    }
+    return 'desktop';
+  },
+  // карточка-подсказка: показывается, пока приложение открыто во вкладке браузера
+  card() {
+    if (this.standalone) return '';
+    const p = this.platform;
+    let body;
+    if (p === 'android-chrome') body = this.prompt
+      ? '<p class="sub" style="margin:0">Установите Healthy Family как отдельное приложение — с иконкой на рабочем столе и без адресной строки.</p><button type="button" class="btn" id="doinstall">Установить приложение</button>'
+      : '<p class="sub" style="margin:0">Чтобы установить: меню <b>⋮</b> → <b>«Установить приложение»</b>. Если пункта нет, обновите страницу и подождите несколько секунд.</p>';
+    else if (p === 'android-other') body = '<p class="sub" style="margin:0">Ссылка открыта не в Chrome — здесь приложение не установится. Скопируйте адрес и откройте его в <b>Google Chrome</b>.</p><button type="button" class="btn ghost" id="copyurl">Скопировать адрес</button>';
+    else if (p === 'ios') body = '<p class="sub" style="margin:0">Откройте ссылку в <b>Safari</b> → кнопка <b>«Поделиться»</b> → <b>«На экран „Домой“»</b>. Пользуйтесь приложением только с иконки: так данные хранятся надёжно.</p>';
+    else body = '<p class="sub" style="margin:0">Healthy Family рассчитано на телефон. Откройте этот адрес на телефоне в Chrome (Android) или Safari (iPhone).</p>';
+    return `<section class="card" id="installcard" style="background:var(--accent-soft)"><h2>Установите приложение</h2>${body}</section>`;
+  },
+  bind() {
+    const b = $('#doinstall');
+    if (b) b.onclick = async () => { const p = this.prompt; this.prompt = null; await p.prompt(); render(); };
+    const c = $('#copyurl');
+    if (c) c.onclick = async () => { try { await navigator.clipboard.writeText(location.href.split('#')[0]); toast('Адрес скопирован — вставьте его в Chrome'); } catch (e) { toast(location.href.split('#')[0]); } };
+  }
+};
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); Install.prompt = e; if ($('#installcard')) render(); });
+window.addEventListener('appinstalled', () => { Install.prompt = null; toast('Приложение установлено — открывайте его с иконки'); });
+
+let swReg = null;
+async function setupUpdates() {
+  if (!('serviceWorker' in navigator)) return;
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloading = false;
+  // новая версия взяла управление → один раз перезагружаемся, чтобы показать её
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloading || (draft && draft.stage === 'review')) return;
+    reloading = true; location.reload();
+  });
+  try { swReg = await navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }); } catch (e) { return; }
+  // проверяем обновления при каждом возвращении в приложение и раз в час
+  const check = () => swReg && swReg.update().catch(() => {});
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
+  setInterval(check, 60 * 60 * 1000);
+}
+function announceVersion() {
+  const prev = localStorage.getItem('seenVersion');
+  if (prev && prev !== APP_VERSION) toast('Приложение обновлено до версии ' + APP_VERSION);
+  localStorage.setItem('seenVersion', APP_VERSION);
+}
+
 (async function start() {
   await Metrics.load();
   if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+  setupUpdates();
   render();
+  announceVersion();
 })();
