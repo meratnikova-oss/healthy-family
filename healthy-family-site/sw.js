@@ -1,7 +1,7 @@
 // Офлайн-оболочка приложения. VERSION меняйте при каждом выпуске — так очищается старый кэш.
-const VERSION = 'v0.5.0';
+const VERSION = 'v0.8.0';
 const SHARE_CACHE = 'share-inbox'; // файлы, пришедшие через «Поделиться»
-const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'db.js', 'metrics.js', 'extract.js', 'anamnesis.js', 'mailbox.js', 'iddocs.js', 'icd10.json', 'icd10-aliases.json',
+const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'db.js', 'metrics.js', 'extract.js', 'anamnesis.js', 'mailbox.js', 'iddocs.js', 'care.js', 'health.js', 'backup.js', 'upload.js', 'icd10.json', 'icd10-aliases.json',
   'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png',
   'dexie.min.js', 'pdf.min.js', 'pdf.worker.min.js', 'mammoth.browser.min.js', 'xlsx.full.min.js',
   'onest-cyrillic-400-normal.woff2', 'onest-cyrillic-500-normal.woff2', 'onest-cyrillic-600-normal.woff2', 'onest-cyrillic-700-normal.woff2'];

@@ -1,4 +1,4 @@
-const APP_VERSION = '0.5.0';
+const APP_VERSION = '0.8.0';
 const app = document.getElementById('app');
 
 // ---------- утилиты ----------
@@ -20,7 +20,9 @@ const settings = {
   get apiUrl() { return localStorage.getItem('apiUrl') || ''; },
   get apiToken() { return localStorage.getItem('apiToken') || ''; },
   get profileId() { return +localStorage.getItem('profileId') || null; },
-  set profileId(v) { localStorage.setItem('profileId', v); }
+  set profileId(v) { localStorage.setItem('profileId', v); },
+  get space() { return localStorage.getItem('space') === 'pets' ? 'pets' : 'people'; },
+  set space(v) { localStorage.setItem('space', v); }
 };
 
 async function api(action, payload) {
@@ -41,20 +43,48 @@ async function api(action, payload) {
   return data;
 }
 
+// Два пространства: «Семья» (люди) и «Питомцы». Питомцы не смешиваются с людьми.
+const spaceOf = p => (p && p.kind === 'pet' ? 'pets' : 'people');
+const isFemale = p => p && p.kind !== 'pet' && p.sex === 'f';
+async function spaceProfiles(space = settings.space) {
+  return (await db.profiles.toArray()).filter(p => spaceOf(p) === space);
+}
 async function currentProfile() {
-  const all = await db.profiles.toArray();
+  const all = await spaceProfiles();
   if (!all.length) return null;
   return all.find(p => p.id === settings.profileId) || all[0];
+}
+function spaceSwitch(counts) {
+  const sp = settings.space;
+  return `<div class="pad" style="margin-top:4px"><div class="seg" role="tablist">
+    <button type="button" class="${sp === 'people' ? 'on' : ''}" data-space="people">Семья${counts.people ? ' · ' + counts.people : ''}</button>
+    <button type="button" class="${sp === 'pets' ? 'on' : ''}" data-space="pets">Питомцы${counts.pets ? ' · ' + counts.pets : ''}</button></div></div>`;
+}
+async function spaceCounts() {
+  const all = await db.profiles.toArray();
+  return { people: all.filter(p => spaceOf(p) === 'people').length, pets: all.filter(p => spaceOf(p) === 'pets').length };
+}
+function bindSpaceSwitch() {
+  $$('[data-space]').forEach(b => b.onclick = () => { settings.space = b.dataset.space; render(); });
+}
+function emptySpace() {
+  const pets = settings.space === 'pets';
+  return `<div class="pad stack"><section class="card">
+    <h2>${pets ? 'Питомцев пока нет' : 'В семье пока никого'}</h2>
+    <p class="sub" style="margin:0">${pets ? 'Добавьте собаку, кошку или другого питомца — у него будут свои разделы, прививки, обработки и лекарства.' : 'Добавьте себя или членов семьи.'}</p>
+    <a class="btn" href="#/profile/new?space=${settings.space}">${pets ? 'Добавить питомца' : 'Добавить профиль'}</a></section></div>`;
 }
 
 const ICONS = {
   home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>',
   sections: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>',
   upload: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 16V4M7 9l5-5 5 5M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>',
+  calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>',
+  dynamics: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l5-6 4 3 6-8 3 3"/></svg>',
   settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>'
 };
 function nav(active) {
-  const items = [['#/', 'home', 'Главная'], ['#/sections', 'sections', 'Разделы'], ['#/upload', 'upload', 'Загрузить'], ['#/settings', 'settings', 'Настройки']];
+  const items = [['#/', 'home', 'Главная'], ['#/sections', 'sections', 'Разделы'], ['#/calendar', 'calendar', 'Календарь'], ['#/dynamics', 'dynamics', 'Динамика'], ['#/settings', 'settings', 'Ещё']];
   return `<nav class="bottom">${items.map(([h, k, t]) => `<a href="${h}" class="${active === k ? 'on' : ''}">${ICONS[k]}${t}</a>`).join('')}</nav>`;
 }
 function backLink(href) { return `<a class="back" href="${href}" aria-label="Назад">‹</a>`; }
@@ -63,7 +93,7 @@ function profileChips(profiles, current, hrefBase) {
   return `<div class="chips">${profiles.map(p => `
     <button type="button" class="chip ${p.id === current.id ? 'on' : ''}" data-profile="${p.id}">
       <span class="av">${esc((p.name || '?')[0].toUpperCase())}</span>${esc(p.name)}</button>`).join('')}
-    <a class="chip add" href="#/profile/new" aria-label="Добавить профиль">+</a></div>`;
+    <a class="chip add" href="#/profile/new?space=${settings.space}" aria-label="${settings.space === 'pets' ? 'Добавить питомца' : 'Добавить профиль'}">+</a></div>`;
 }
 function bindProfileChips() {
   $$('[data-profile]').forEach(b => b.onclick = () => { settings.profileId = +b.dataset.profile; render(); });
@@ -99,40 +129,75 @@ async function viewOnboarding() {
     <div class="top"><h1>Healthy Family</h1></div>
     <div class="pad stack">
       <p class="sub" style="font-size:15px">Архив анализов и медицинских документов для вас и семьи. Всё хранится на этом телефоне.</p>
+      <a class="btn ghost" href="#/backup/restore">У меня уже есть данные — восстановить из облака</a>
       ${Install.card()}
       ${profileForm('Создать профиль')}
     </div>`;
-  bindProfileForm(); Install.bind();
+  bindProfileForm('people'); Install.bind();
 }
 
-function profileForm(cta) {
+const SPECIES = ['Собака', 'Кошка', 'Другое'];
+function profileForm(cta, space = 'people', p = {}) {
+  if (space === 'pets') return `<form id="pform" class="card">
+    <h2>${p.id ? 'Данные питомца' : 'Новый питомец'}</h2>
+    <label class="f">Кличка<input class="in" name="name" required value="${esc(p.name || '')}" placeholder="Например, Граф"></label>
+    <label class="f">Вид<select class="in" name="species">${SPECIES.map(s => `<option ${p.species === s ? 'selected' : ''}>${s}</option>`).join('')}</select></label>
+    <label class="f">Порода<input class="in" name="breed" value="${esc(p.breed || '')}" placeholder="Например, лабрадор"></label>
+    <label class="f">Пол<select class="in" name="sex"><option value="m" ${p.sex === 'm' ? 'selected' : ''}>Мальчик</option><option value="f" ${p.sex === 'f' ? 'selected' : ''}>Девочка</option></select></label>
+    <label class="f">Дата рождения<input class="in" type="date" name="birth" value="${esc(p.birth || '')}"></label>
+    <label class="f">Контакт владельца для экстренной карты<input class="in" name="contact" value="${esc(p.contact || '')}" placeholder="Имя и телефон"></label>
+    <button class="btn" type="submit">${cta}</button>
+  </form>`;
   return `<form id="pform" class="card">
-    <h2>Первый профиль</h2>
-    <label class="f">Имя<input class="in" name="name" required placeholder="Например, Мария"></label>
-    <label class="f">Кто это<select class="in" name="kind"><option value="adult">Взрослый</option><option value="child">Ребёнок</option><option value="pet">Питомец</option></select></label>
-    <label class="f" id="sexf">Пол<select class="in" name="sex"><option value="f">Женский</option><option value="m">Мужской</option></select></label>
-    <label class="f">Дата рождения<input class="in" type="date" name="birth"></label>
-    <label class="f" id="speciesf" hidden>Вид и порода<input class="in" name="species" placeholder="Например, собака, лабрадор"></label>
+    <h2>${p.id ? 'Данные профиля' : 'Новый профиль'}</h2>
+    <label class="f">Имя<input class="in" name="name" required value="${esc(p.name || '')}" placeholder="Например, Мария"></label>
+    <label class="f">Кто это<select class="in" name="kind"><option value="adult" ${p.kind !== 'child' ? 'selected' : ''}>Взрослый</option><option value="child" ${p.kind === 'child' ? 'selected' : ''}>Ребёнок</option></select></label>
+    <label class="f">Пол<select class="in" name="sex"><option value="f" ${p.sex !== 'm' ? 'selected' : ''}>Женский</option><option value="m" ${p.sex === 'm' ? 'selected' : ''}>Мужской</option></select></label>
+    <label class="f">Дата рождения<input class="in" type="date" name="birth" value="${esc(p.birth || '')}"></label>
+    <label class="f">Экстренный контакт<input class="in" name="contact" value="${esc(p.contact || '')}" placeholder="Например, Муж, +7 900 000-00-00"></label>
     <button class="btn" type="submit">${cta}</button>
   </form>`;
 }
-function bindProfileForm() {
+function bindProfileForm(space = 'people', existing = null) {
   const f = $('#pform');
-  f.kind.onchange = () => { $('#speciesf').hidden = f.kind.value !== 'pet'; };
   f.onsubmit = async e => {
     e.preventDefault();
-    const p = { name: f.name.value.trim(), kind: f.kind.value, sex: f.sex.value, birth: f.birth.value || null, species: f.species.value.trim() || null };
-    const id = await createProfile(p);
-    settings.profileId = id;
+    const v = n => (f[n] ? f[n].value.trim() : '');
+    const data = space === 'pets'
+      ? { name: v('name'), kind: 'pet', species: v('species'), breed: v('breed') || null, sex: v('sex'), birth: v('birth') || null, contact: v('contact') || null }
+      : { name: v('name'), kind: v('kind'), sex: v('sex'), birth: v('birth') || null, contact: v('contact') || null };
+    if (existing) {
+      await db.profiles.update(existing.id, data);
+      toast('Сохранено');
+      location.hash = '#/profile/' + existing.id;
+      return;
+    }
+    const id = await createProfile(data);
+    settings.space = space; settings.profileId = id;
+    if (typeof seedVaccines === 'function') await seedVaccines(id).catch(() => {});
     location.hash = '#/';
     render();
   };
 }
 
 async function viewProfileNew() {
-  app.innerHTML = `<div class="top">${backLink('#/')}<h1 class="grow">Новый профиль</h1></div><div class="pad">${profileForm('Добавить')}</div>${nav('')}`;
-  $('#pform h2').textContent = 'Кого добавляем';
-  bindProfileForm();
+  const space = new URLSearchParams(location.hash.split('?')[1] || '').get('space') === 'pets' ? 'pets' : 'people';
+  app.innerHTML = `<div class="top">${backLink('#/')}<h1 class="grow">${space === 'pets' ? 'Новый питомец' : 'Новый профиль'}</h1></div><div class="pad">${profileForm('Добавить', space)}</div>${nav('')}`;
+  bindProfileForm(space);
+}
+async function viewProfileEdit(id) {
+  const p = await db.profiles.get(+id);
+  if (!p) { location.hash = '#/'; return; }
+  const space = spaceOf(p);
+  app.innerHTML = `<div class="top">${backLink('#/profile/' + p.id)}<h1 class="grow">Изменить</h1></div>
+    <div class="pad stack">${profileForm('Сохранить', space, p)}
+    <button type="button" class="btn danger" id="pdel">Удалить ${space === 'pets' ? 'питомца' : 'профиль'} со всеми данными</button></div>${nav('')}`;
+  bindProfileForm(space, p);
+  $('#pdel').onclick = async () => {
+    if (!confirm(`Удалить «${p.name}» вместе со всеми записями, файлами, документами и прививками? Это нельзя отменить.`)) return;
+    await deleteProfile(p.id);
+    toast('Удалено'); location.hash = '#/';
+  };
 }
 
 async function latestFlags(profileId) {
@@ -146,41 +211,64 @@ async function latestFlags(profileId) {
 }
 
 async function viewHome() {
-  const profiles = await db.profiles.toArray();
-  if (!profiles.length) return viewOnboarding();
+  const all = await db.profiles.toArray();
+  if (!all.length) return viewOnboarding();
+  const counts = await spaceCounts();
+  const profiles = await spaceProfiles();
   const p = await currentProfile();
+  if (!p) {
+    app.innerHTML = `<div class="top"><h1 class="grow">Healthy Family</h1></div>${spaceSwitch(counts)}${emptySpace()}${nav('home')}`;
+    bindSpaceSwitch(); return;
+  }
+  const pet = p.kind === 'pet';
   const flags = await latestFlags(p.id);
-  const recent = await db.records.where('profileId').equals(p.id).reverse().sortBy('date');
+  const recent = (await db.records.where('profileId').equals(p.id).toArray()).sort((x, y) => (y.date || '').localeCompare(x.date || ''));
   const sections = await db.sections.where('profileId').equals(p.id).toArray();
   const secName = id => (sections.find(s => s.id === id) || {}).name || '';
+  const upcoming = (await homeEvents(profiles, 60)).slice(0, 5);
+  const today = await todayMeds(p);
+  const kindLabel = pet ? [p.species, p.breed].filter(Boolean).join(' · ') || 'Питомец' : p.kind === 'child' ? 'Ребёнок' : 'Профиль';
   app.innerHTML = `
-    <div class="top"><div class="grow"><div class="sub">${p.kind === 'pet' ? 'Питомец' : p.kind === 'child' ? 'Ребёнок' : 'Профиль'}</div><h1>${esc(p.name)}</h1></div>
-      <a class="pill" href="#/profile/${p.id}" style="text-decoration:none;color:inherit">Анамнез и документы</a></div>
+    <div class="top"><div class="grow"><div class="sub">${esc(kindLabel)}</div><h1>${esc(p.name)}</h1></div>
+      <a class="pill" href="#/profile/${p.id}" style="text-decoration:none;color:inherit">Профиль</a></div>
+    ${spaceSwitch(counts)}
     ${profileChips(profiles, p)}
     <div class="pad stack">
-      <section class="card">
+      ${flags.length ? `<section class="card">
         <h2>Требуют внимания</h2>
-        ${flags.length ? flags.map(r => `
+        ${flags.map(r => `
           <a class="row ${r.status}" href="#/metric/${encodeURIComponent(r.metricId)}" style="text-decoration:none;color:inherit">
             <span class="badge">${r.status === 'low' ? '↓' : '↑'}</span>
             <div class="grow"><div style="font-weight:500">${esc(Metrics.nameFor(r.metricId, r.rawName))}</div>
               <div class="sub">${r.status === 'low' ? 'Ниже' : 'Выше'} референса · ${fmtDate(r.date)}</div></div>
             <span class="val">${esc(fmtNum(r.num))} <span class="sub">${esc(r.unit)}</span></span>
-          </a>`).join('') : '<p class="empty">Последние значения всех показателей в пределах референса — или анализов пока нет.</p>'}
+          </a>`).join('')}
+      </section>` : ''}
+      <section class="card">
+        <div class="between"><h2>Ближайшее</h2><a href="#/calendar" style="font-size:13px;text-decoration:none">Календарь</a></div>
+        ${upcoming.length ? upcoming.map(eventRow).join('') : '<p class="empty" style="margin:0">Запланированных событий нет. Прививки, пересдачи и плановые осмотры появятся здесь.</p>'}
+      </section>
+      <section class="card">
+        <div class="between"><h2>Сегодня принять</h2><a href="#/meds/${p.id}" style="font-size:13px;text-decoration:none">Все лекарства</a></div>
+        ${today.length ? today.map(t => `<label class="row" style="min-height:44px">
+            <input type="checkbox" data-take="${t.med.id}|${t.time}" ${t.taken ? 'checked' : ''} style="width:22px;height:22px;accent-color:var(--accent)">
+            <span class="grow">${esc(t.med.name)}${t.med.dose ? ' · ' + esc(t.med.dose) : ''}</span><span class="sub">${esc(t.time)}</span></label>`).join('')
+          : `<p class="empty" style="margin:0">На сегодня ничего. <a href="#/med/new/${p.id}">Добавить лекарство</a></p>`}
       </section>
       <section class="card">
         <div class="between"><h2>Последние записи</h2><a href="#/sections" style="font-size:13px;text-decoration:none">Все разделы</a></div>
-        ${recent.length ? recent.slice(0, 6).map(r => `
+        ${recent.length ? recent.slice(0, 5).map(r => `
           <a class="row" href="#/record/${r.id}" style="text-decoration:none;color:inherit">
             <div class="grow"><div style="font-weight:500">${esc(r.title || RECORD_TYPES[r.type])}</div>
-              <div class="sub">${fmtDate(r.date)} · ${esc(r.sectionIds.map(secName).filter(Boolean).join(', '))}</div></div>
+              <div class="sub">${fmtDate(r.date)} · ${esc((r.sectionIds || []).map(secName).filter(Boolean).join(', '))}</div></div>
             <span class="tag kind">${esc(RECORD_TYPES[r.type] || 'Документ')}</span>
-          </a>`).join('') : '<p class="empty">Загрузите первый анализ или документ — кнопка внизу справа.</p>'}
+          </a>`).join('') : '<p class="empty" style="margin:0">Загрузите первый анализ или документ — кнопка внизу справа.</p>'}
       </section>
     </div>
     <a class="fab" href="#/upload">+ Загрузить</a>
     ${nav('home')}`;
-  bindProfileChips();
+  bindProfileChips(); bindSpaceSwitch();
+  $$('[data-take]').forEach(c => c.onchange = async () => { const [m, t] = c.dataset.take.split('|'); await toggleTaken(+m, t, c.checked); });
   if (!Install.standalone) { $('.pad.stack').insertAdjacentHTML('afterbegin', Install.card()); Install.bind(); }
   expiringDocs().then(async docs => {
     if (!docs.length || !$('.pad.stack')) return;
@@ -189,6 +277,17 @@ async function viewHome() {
     a.className = 'card'; a.style.background = 'var(--high-soft)';
     a.innerHTML = '<h2>Документы</h2>' + docs.map(d => `<a class="row hist" href="#/doc/${d.id}"><span class="grow">${esc(docTitle(d))} · ${esc(names[d.profileId] || '')}</span>${expiryTag(d)}</a>`).join('');
     $('.pad.stack').prepend(a);
+  });
+  Backup.meta().then(async m => {
+    if (!$('.pad.stack')) return;
+    let html = '';
+    if (m.enabled && m.error) html = `<a class="card" href="#/settings" style="text-decoration:none;color:inherit;background:var(--high-soft)"><h2>Резервная копия не сохранилась</h2><span class="sub">${esc(m.error)} · открыть настройки</span></a>`;
+    else if (!m.enabled && (await db.records.count()) >= 3 && localStorage.getItem('bkNag') !== new Date().toISOString().slice(0, 7))
+      html = `<section class="card" style="background:var(--high-soft)"><h2>Данные есть только в этом телефоне</h2><span class="sub">Включите зашифрованную копию в облаке, чтобы ничего не потерять.</span>
+        <div class="row"><a class="btn" href="#/settings" style="flex:1">Включить</a><button type="button" class="btn ghost" id="bknag" style="flex:1">Позже</button></div></section>`;
+    if (!html) return;
+    $('.pad.stack').insertAdjacentHTML('afterbegin', html);
+    const n = $('#bknag'); if (n) n.onclick = () => { localStorage.setItem('bkNag', new Date().toISOString().slice(0, 7)); n.closest('section').remove(); };
   });
   MailInbox.count().then(n => {
     if (!n || !$('.pad.stack')) return;
@@ -200,53 +299,209 @@ async function viewHome() {
 }
 
 async function viewSections() {
-  const profiles = await db.profiles.toArray();
-  if (!profiles.length) return viewOnboarding();
+  const all = await db.profiles.toArray();
+  if (!all.length) return viewOnboarding();
+  const counts = await spaceCounts();
+  const profiles = await spaceProfiles();
   const p = await currentProfile();
+  if (!p) { app.innerHTML = `<div class="top"><h1 class="grow">Разделы</h1></div>${spaceSwitch(counts)}${emptySpace()}${nav('sections')}`; bindSpaceSwitch(); return; }
   const sections = (await db.sections.where('profileId').equals(p.id).toArray()).sort((a, b) => a.order - b.order);
-  const counts = {};
-  for (const s of sections) counts[s.id] = await db.records.where('sectionIds').equals(s.id).count();
+  const counts2 = {}, flagsBy = {};
+  const flags = await latestFlags(p.id);
+  for (const s of sections) counts2[s.id] = await db.records.where('sectionIds').equals(s.id).count();
+  const plans = await db.plans.where('profileId').equals(p.id).toArray();
+  const planBy = {}; for (const pl of plans) if (!planBy[pl.sectionId] || (pl.nextDate || '9') < (planBy[pl.sectionId].nextDate || '9')) planBy[pl.sectionId] = pl;
+  for (const f of flags) { const m = Metrics.byId(f.metricId); const sname = m && m.section; const sid = (sections.find(s => s.name === sname) || {}).id; if (sid) flagsBy[sid] = (flagsBy[sid] || 0) + 1; }
   app.innerHTML = `
-    <div class="top"><h1 class="grow">Разделы</h1></div>
+    <div class="top"><h1 class="grow">Разделы</h1><a class="pill" href="#/sections/edit" style="text-decoration:none;color:inherit">Изменить</a></div>
+    ${spaceSwitch(counts)}
     ${profileChips(profiles, p)}
-    <div class="pad grid2">
-      ${sections.map(s => `
-        <a class="tile" href="#/section/${s.id}">
+    <div class="pad stack" style="gap:10px">
+      <div class="row" style="gap:8px">
+        <a class="btn ghost" href="#/emergency/${p.id}" style="flex:1;min-height:44px;font-size:13px;background:var(--high-soft);border:none;color:#8A3A1A">Экстренная карта</a>
+        <a class="btn ghost" href="#/summary/${p.id}" style="flex:1;min-height:44px;font-size:13px;background:var(--accent-soft);border:none;color:var(--accent)">Сводка для врача</a>
+      </div>
+      <div class="grid2">
+      ${sections.map(s => {
+        const pl = planBy[s.id];
+        const status = flagsBy[s.id] ? `<span class="sub" style="color:var(--high);font-weight:600">${flagsBy[s.id]} вне нормы</span>` : pl && pl.nextDate ? `<span class="sub" style="color:var(--accent);font-weight:600">${esc(pl.name)} ${relDays(pl.nextDate)}</span>` : '';
+        return `<a class="tile" href="#/section/${s.id}">
           <div class="row" style="gap:8px"><span class="dotc" style="background:${s.color}"></span><span style="font-weight:600;font-size:14px">${esc(s.name)}</span></div>
-          <span class="sub">${counts[s.id] ? counts[s.id] + ' ' + plural(counts[s.id], 'запись', 'записи', 'записей') : 'Пусто'}</span>
-        </a>`).join('')}
+          <span class="sub">${counts2[s.id] ? counts2[s.id] + ' ' + plural(counts2[s.id], 'запись', 'записи', 'записей') : 'Пусто'}</span>${status}
+        </a>`; }).join('')}
       <button type="button" class="tile" id="addsec" style="border:1.5px dashed #9AA0AA;background:transparent;cursor:pointer;justify-content:center;align-items:center">+ Свой раздел</button>
+      </div>
     </div>
     ${nav('sections')}`;
-  bindProfileChips();
+  bindProfileChips(); bindSpaceSwitch();
   $('#addsec').onclick = async () => {
     const name = prompt('Название раздела');
-    if (!name) return;
+    if (!name || !name.trim()) return;
     await db.sections.add({ profileId: p.id, name: name.trim(), color: SECTION_COLORS[sections.length % SECTION_COLORS.length], order: sections.length });
     render();
   };
 }
 function plural(n, a, b, c) { const m10 = n % 10, m100 = n % 100; return m10 === 1 && m100 !== 11 ? a : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? b : c; }
+const todayISO = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
+function daysBetween(a, b) { return Math.round((new Date(b + 'T12:00:00') - new Date(a + 'T12:00:00')) / 864e5); }
+function relDays(date) {
+  if (!date) return '';
+  const n = daysBetween(todayISO(), date);
+  if (n < 0) return 'просрочено';
+  if (n === 0) return 'сегодня';
+  if (n === 1) return 'завтра';
+  if (n < 31) return `через ${n} ${plural(n, 'день', 'дня', 'дней')}`;
+  const m = Math.round(n / 30.4);
+  if (m < 12) return `через ${m} мес`;
+  const y = Math.round(n / 365);
+  return `через ${y} ${plural(y, 'год', 'года', 'лет')}`;
+}
+function addMonths(date, n) { const d = new Date(date + 'T12:00:00'); d.setMonth(d.getMonth() + +n); return d.toISOString().slice(0, 10); }
 
-async function viewSection(id) {
+// Изменение разделов: переименовать, цвет, порядок, удалить
+async function viewSectionsEdit() {
+  const p = await currentProfile();
+  if (!p) { location.hash = '#/sections'; return; }
+  const draw = async () => {
+    const sections = (await db.sections.where('profileId').equals(p.id).toArray()).sort((a, b) => a.order - b.order);
+    app.innerHTML = `<div class="top">${backLink('#/sections')}<div class="grow"><div class="sub">${esc(p.name)}</div><h1>Изменить разделы</h1></div></div>
+      <div class="pad stack" style="gap:10px">
+        ${sections.map((s, i) => `<section class="card" style="gap:8px;padding:12px">
+          <div class="row" style="gap:8px">
+            <input class="in" data-name="${s.id}" value="${esc(s.name)}" aria-label="Название раздела" style="flex:1">
+            <button type="button" class="pill" data-up="${s.id}" ${i === 0 ? 'disabled' : ''} aria-label="Выше">↑</button>
+            <button type="button" class="pill" data-down="${s.id}" ${i === sections.length - 1 ? 'disabled' : ''} aria-label="Ниже">↓</button>
+          </div>
+          <div class="row" style="gap:6px;flex-wrap:wrap">${SECTION_COLORS.map(c => `<button type="button" data-color="${s.id}|${c}" aria-label="Цвет" style="width:28px;height:28px;border-radius:14px;border:${c === s.color ? '3px solid var(--ink)' : '1px solid #ddd'};background:${c};cursor:pointer"></button>`).join('')}
+            <button type="button" class="linkbtn" data-del="${s.id}" style="margin-left:auto;color:var(--high)">Удалить</button></div>
+        </section>`).join('')}
+        <p class="sub" style="margin:0">Название сохраняется, когда вы выходите из поля. Записи удалённого раздела не пропадают: они остаются в других своих разделах или переходят в «Прочее».</p>
+      </div>${nav('sections')}`;
+    $$('[data-name]').forEach(i => i.onchange = async () => { if (i.value.trim()) { await db.sections.update(+i.dataset.name, { name: i.value.trim() }); toast('Переименовано'); } });
+    $$('[data-color]').forEach(b => b.onclick = async () => { const [id, c] = b.dataset.color.split('|'); await db.sections.update(+id, { color: c }); draw(); });
+    const move = async (id, dir) => {
+      const i = sections.findIndex(s => s.id === id), j = i + dir;
+      if (j < 0 || j >= sections.length) return;
+      await db.sections.update(sections[i].id, { order: j }); await db.sections.update(sections[j].id, { order: i });
+      sections.forEach(async (s, k) => { if (k !== i && k !== j && s.order !== k) await db.sections.update(s.id, { order: k }); });
+      draw();
+    };
+    $$('[data-up]').forEach(b => b.onclick = () => move(+b.dataset.up, -1));
+    $$('[data-down]').forEach(b => b.onclick = () => move(+b.dataset.down, 1));
+    $$('[data-del]').forEach(b => b.onclick = async () => {
+      const s = sections.find(x => x.id === +b.dataset.del);
+      const n = await db.records.where('sectionIds').equals(s.id).count();
+      if (!confirm(`Удалить раздел «${s.name}»?${n ? ` ${n} ${plural(n, 'запись останется', 'записи останутся', 'записей останутся')} в других разделах или в «Прочее».` : ''}`)) return;
+      await removeSection(p.id, s.id);
+      draw();
+    });
+  };
+  draw();
+}
+async function removeSection(profileId, sectionId) {
+  let other = await db.sections.where('profileId').equals(profileId).filter(x => x.name === 'Прочее' && x.id !== sectionId).first();
+  const recs = await db.records.where('sectionIds').equals(sectionId).toArray();
+  for (const r of recs) {
+    let ids = (r.sectionIds || []).filter(x => x !== sectionId);
+    if (!ids.length) {
+      if (!other) { const oid = await db.sections.add({ profileId, name: 'Прочее', color: '#6B7280', order: 99 }); other = { id: oid }; }
+      ids = [other.id];
+    }
+    await db.records.update(r.id, { sectionIds: ids });
+  }
+  await db.plans.where('sectionId').equals(sectionId).delete();
+  await db.sections.delete(sectionId);
+}
+
+async function viewSection(id, tab = 'timeline') {
   const s = await db.sections.get(+id);
   if (!s) { location.hash = '#/sections'; return; }
+  const p = await db.profiles.get(s.profileId);
   const records = (await db.records.where('sectionIds').equals(s.id).toArray()).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
   const clinics = await db.clinics.toArray(), doctors = await db.doctors.toArray();
   const nm = (arr, id) => (arr.find(x => x.id === id) || {}).name || '';
+  const plans = (await db.plans.where('sectionId').equals(s.id).toArray()).sort((a, b) => (a.nextDate || '9').localeCompare(b.nextDate || '9'));
+  // ведущий врач — тот, кто чаще всего встречается в записях раздела
+  const docCount = {}; records.forEach(r => { if (r.doctorId) docCount[r.doctorId] = (docCount[r.doctorId] || 0) + 1; });
+  const lead = Object.entries(docCount).sort((a, b) => b[1] - a[1])[0];
+  const leadRec = lead && records.find(r => r.doctorId === +lead[0]);
+  const tabs = [['timeline', 'Хронология'], ['metrics', 'Показатели'], ['files', 'Документы']];
   app.innerHTML = `
-    <div class="top">${backLink('#/sections')}<div class="grow"><div class="row" style="gap:10px"><span class="dotc" style="width:12px;height:12px;border-radius:6px;background:${s.color}"></span><h1>${esc(s.name)}</h1></div></div></div>
-    <div class="pad">
-      ${records.length ? records.map(r => `
-        <div class="tl"><div class="rail"><i style="background:${s.color}"></i><b></b></div>
-          <a href="#/record/${r.id}">
-            <div class="between"><span class="tag kind">${esc(RECORD_TYPES[r.type] || 'Документ')}</span><span class="sub">${fmtDate(r.date)}</span></div>
-            <span style="font-weight:500">${esc(r.title || RECORD_TYPES[r.type])}</span>
-            <span class="sub">${esc([nm(doctors, r.doctorId), nm(clinics, r.clinicId)].filter(Boolean).join(' · '))}</span>
-          </a></div>`).join('') : '<div class="card"><p class="empty">В разделе пока нет записей. Загрузите протокол осмотра, УЗИ, анализ или любой другой документ.</p></div>'}
-      <div style="margin-top:16px"><a class="btn" href="#/upload?section=${s.id}">Добавить запись в раздел</a></div>
+    <div class="top">${backLink('#/sections')}<div class="grow"><div class="sub">${esc(p.name)}</div><div class="row" style="gap:10px"><span class="dotc" style="width:12px;height:12px;border-radius:6px;background:${s.color}"></span><h1>${esc(s.name)}</h1></div></div>
+      <button type="button" class="pill" id="rename">Переименовать</button></div>
+    <div class="pad stack">
+      ${lead ? `<span class="sub" style="margin-top:-6px">Ведущий врач: ${esc(nm(doctors, +lead[0]))}${leadRec && leadRec.clinicId ? ' · ' + esc(nm(clinics, leadRec.clinicId)) : ''}</span>` : ''}
+      <section class="card">
+        <div class="between"><h2>Плановые обследования</h2><button type="button" class="linkbtn" id="addplan">+ Добавить</button></div>
+        ${plans.length ? plans.map(pl => `<div class="row">
+            <div class="grow"><div style="font-weight:500">${esc(pl.name)}</div><div class="sub">${pl.everyMonths ? 'Раз в ' + monthsText(pl.everyMonths) : 'Без повтора'}${pl.lastDate ? ' · было ' + fmtDate(pl.lastDate) : ''}</div></div>
+            <span class="tag ${pl.nextDate && pl.nextDate < todayISO() ? 'high' : 'kind'}">${pl.nextDate ? relDays(pl.nextDate) : 'без даты'}</span>
+            <button type="button" class="pill" data-plan="${pl.id}" aria-label="Изменить">…</button></div>`).join('')
+          : '<p class="empty" style="margin:0">Например, «Осмотр раз в год». Интервал задаёте вы или врач — приложение только напомнит.</p>'}
+      </section>
+      <div class="seg" role="tablist">${tabs.map(([k, t]) => `<button type="button" class="${tab === k ? 'on' : ''}" data-stab="${k}">${t}</button>`).join('')}</div>
+      <div id="stab"></div>
+      <a class="btn" href="#/upload?section=${s.id}">Добавить запись в раздел</a>
     </div>
     ${nav('sections')}`;
+  const box = $('#stab');
+  if (tab === 'timeline') {
+    box.innerHTML = records.length ? records.map(r => `
+      <div class="tl"><div class="rail"><i style="background:${s.color}"></i><b></b></div>
+        <a href="#/record/${r.id}">
+          <div class="between"><span class="tag kind">${esc(RECORD_TYPES[r.type] || 'Документ')}</span><span class="sub">${fmtDate(r.date)}</span></div>
+          <span style="font-weight:500">${esc(r.title || RECORD_TYPES[r.type])}</span>
+          <span class="sub">${esc([nm(doctors, r.doctorId), nm(clinics, r.clinicId)].filter(Boolean).join(' · '))}</span>
+        </a></div>`).join('') : '<div class="card"><p class="empty">В разделе пока нет записей.</p></div>';
+  } else if (tab === 'metrics') {
+    const recIds = new Set(records.map(r => r.id));
+    const res = (await db.results.where('profileId').equals(p.id).toArray()).filter(r => recIds.has(r.recordId));
+    const latest = new Map(); res.forEach(r => { const q = latest.get(r.metricId); if (!q || (r.date || '') > (q.date || '')) latest.set(r.metricId, r); });
+    box.innerHTML = latest.size ? `<section class="card"><div>${[...latest.values()].map(r => resultRow(r, '#/metric/' + encodeURIComponent(r.metricId))).join('')}</div></section>`
+      : '<div class="card"><p class="empty">В записях раздела нет числовых показателей.</p></div>';
+  } else {
+    const files = [];
+    for (const r of records) for (const f of await db.files.where('recordId').equals(r.id).toArray()) files.push({ f, r });
+    const byRec = new Map(); files.forEach(({ f, r }) => { if (!byRec.has(r.id)) byRec.set(r.id, { r, fs: [] }); byRec.get(r.id).fs.push(f); });
+    box.innerHTML = byRec.size ? `<section class="card">${[...byRec.values()].map(({ r, fs }, k) => `<div class="stack" style="gap:6px"><a href="#/record/${r.id}" style="color:inherit;text-decoration:none;font-weight:600">${esc(r.title || RECORD_TYPES[r.type] || 'Документ')} <span class="sub" style="font-weight:400">· ${fmtDate(r.date)}</span></a>${originalThumbs(fs, k === 0)}</div>`).join('<div style="height:1px;background:var(--soft)"></div>')}</section>`
+      : '<div class="card"><p class="empty">Файлов пока нет.</p></div>';
+    bindOriginals();
+  }
+  $$('[data-stab]').forEach(b => b.onclick = () => viewSection(id, b.dataset.stab));
+  $('#rename').onclick = async () => { const n = prompt('Новое название раздела', s.name); if (n && n.trim()) { await db.sections.update(s.id, { name: n.trim() }); viewSection(id, tab); } };
+  $('#addplan').onclick = () => planDialog(p.id, s.id, null, () => viewSection(id, tab));
+  $$('[data-plan]').forEach(b => b.onclick = async () => planDialog(p.id, s.id, await db.plans.get(+b.dataset.plan), () => viewSection(id, tab)));
+}
+const monthsText = n => +n === 12 ? 'год' : +n === 6 ? 'полгода' : +n === 24 ? '2 года' : `${n} мес`;
+
+// Диалог планового обследования (простая форма поверх экрана)
+function planDialog(profileId, sectionId, pl, done) {
+  const ov = document.createElement('div');
+  ov.className = 'sheet';
+  ov.innerHTML = `<form class="card sheet-card">
+    <h2>${pl ? 'Плановое обследование' : 'Новое плановое обследование'}</h2>
+    <label class="f">Что<input class="in" name="name" required value="${esc(pl?.name || '')}" placeholder="Например, Осмотр гинеколога"></label>
+    <label class="f">Как часто<select class="in" name="every">${[['', 'Один раз'], [3, 'Раз в 3 месяца'], [6, 'Раз в полгода'], [12, 'Раз в год'], [24, 'Раз в 2 года'], [36, 'Раз в 3 года']].map(([v, t]) => `<option value="${v}" ${String(pl?.everyMonths ?? 12) === String(v) ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+    <label class="f">Когда было последний раз<input class="in" type="date" name="last" value="${esc(pl?.lastDate || '')}"></label>
+    <label class="f">Следующий раз (если пусто — посчитается от прошлого)<input class="in" type="date" name="next" value="${esc(pl?.nextDate || '')}"></label>
+    <div class="row">${pl ? '<button type="button" class="btn ghost" id="pldone" style="flex:1">Пройдено сегодня</button>' : ''}<button class="btn" type="submit" style="flex:1">Сохранить</button></div>
+    <div class="row"><button type="button" class="btn ghost" id="plcancel" style="flex:1">Отмена</button>${pl ? '<button type="button" class="btn danger" id="pldel" style="flex:1">Удалить</button>' : ''}</div>
+  </form>`;
+  document.body.appendChild(ov);
+  const f = ov.querySelector('form'), close = () => ov.remove();
+  ov.querySelector('#plcancel').onclick = close;
+  f.onsubmit = async e => {
+    e.preventDefault();
+    const every = f.every.value ? +f.every.value : null, last = f.last.value || null;
+    const next = f.next.value || (last && every ? addMonths(last, every) : null);
+    const data = { profileId, sectionId, name: f.name.value.trim(), everyMonths: every, lastDate: last, nextDate: next };
+    if (pl) await db.plans.update(pl.id, data); else await db.plans.add(data);
+    close(); done();
+  };
+  const d = ov.querySelector('#pldone');
+  if (d) d.onclick = async () => { const t = todayISO(); await db.plans.update(pl.id, { lastDate: t, nextDate: pl.everyMonths ? addMonths(t, pl.everyMonths) : null }); close(); toast('Отмечено'); done(); };
+  const x = ov.querySelector('#pldel');
+  if (x) x.onclick = async () => { await db.plans.delete(pl.id); close(); done(); };
 }
 
 async function viewRecord(id, tab = 'results') {
@@ -260,7 +515,8 @@ async function viewRecord(id, tab = 'results') {
   const flagged = results.filter(x => x.status === 'low' || x.status === 'high').length;
   const tabs = [['results', 'Показатели'], ['explain', 'Расшифровка'], ['text', 'Текст'], ['notes', 'Заметки']];
   app.innerHTML = `
-    <div class="top">${backLink(sections[0] ? '#/section/' + sections[0].id : '#/')}<span class="sub grow">${esc(sections.filter(Boolean).map(s => s.name).join(', '))}</span></div>
+    <div class="top">${backLink(sections[0] ? '#/section/' + sections[0].id : '#/')}<span class="sub grow">${esc(sections.filter(Boolean).map(s => s.name).join(', '))}</span>
+      <a class="pill" href="#/record/edit/${r.id}" style="text-decoration:none;color:inherit">Изменить</a></div>
     <div class="pad stack">
       <div class="stack" style="gap:6px"><span class="tag kind" style="align-self:flex-start">${esc(RECORD_TYPES[r.type] || 'Документ')}</span>
         <h1>${esc(r.title || RECORD_TYPES[r.type])}</h1></div>
@@ -271,8 +527,7 @@ async function viewRecord(id, tab = 'results') {
         <div><div class="sub">Вне референса</div><div style="font-weight:500">${results.length ? flagged : '—'}</div></div>
       </section>
       <section class="stack" style="gap:8px">
-        <span class="sub">Файлы — оригиналы хранятся полностью</span>
-        <div class="row" style="flex-wrap:wrap;gap:8px">${files.map(f => `<button type="button" class="pill" data-file="${f.id}">${esc(f.name)}</button>`).join('') || '<span class="empty">Нет файлов</span>'}</div>
+        ${files.length ? `<span class="sub">Оригинал${files.length > 1 ? ` · ${files.length} ${plural(files.length, 'файл', 'файла', 'файлов')}` : ''}</span>${originalThumbs(files)}` : '<span class="sub">Оригинала нет — запись заполнена вручную.</span>'}
       </section>
       <div class="seg" role="tablist">${tabs.map(([k, t]) => `<button type="button" role="tab" class="${tab === k ? 'on' : ''}" data-tab="${k}">${t}</button>`).join('')}</div>
       <section class="card" id="tabbody"></section>
@@ -313,12 +568,7 @@ async function viewRecord(id, tab = 'results') {
     }
   }
   $$('[data-tab]').forEach(b => b.onclick = () => viewRecord(id, b.dataset.tab));
-  $$('[data-file]').forEach(b => b.onclick = async () => {
-    const f = await db.files.get(+b.dataset.file);
-    const url = URL.createObjectURL(f.blob);
-    window.open(url, '_blank');
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
-  });
+  bindOriginals();
   $('#del').onclick = async () => {
     if (!confirm('Удалить запись вместе с файлами и показателями?')) return;
     await deleteRecord(r.id);
@@ -327,10 +577,75 @@ async function viewRecord(id, tab = 'results') {
   };
 }
 
-async function viewMetric(metricId) {
+// Правка записи: всё, что распознал ИИ, можно исправить; запись можно перенести или положить в несколько разделов
+async function viewRecordEdit(id) {
+  const r = await db.records.get(+id);
+  if (!r) { location.hash = '#/'; return; }
+  const p = await db.profiles.get(r.profileId);
+  const sections = (await db.sections.where('profileId').equals(p.id).toArray()).sort((a, b) => a.order - b.order);
+  const clinics = await db.clinics.toArray(), doctors = await db.doctors.toArray();
+  const clinic = r.clinicId ? await db.clinics.get(r.clinicId) : null, doctor = r.doctorId ? await db.doctors.get(r.doctorId) : null;
+  const results = await db.results.where('recordId').equals(r.id).toArray();
+  const ref = x => x === null || x === undefined ? '' : String(x);
+  draft = { stage: 'edit', profileId: p.id, rows: results.map(x => ({ name: x.rawName, value: x.value, unit: x.unit, refLow: ref(x.refLow), refHigh: ref(x.refHigh), refText: x.refText })) };
+  const chosen = new Set(r.sectionIds || []);
+  app.innerHTML = `
+    <div class="top">${backLink('#/record/' + r.id)}<div class="grow"><div class="sub">${esc(p.name)}</div><h1>Изменить запись</h1></div></div>
+    <form id="ref" class="pad stack">
+      <section class="card">
+        <label class="f">Название<input class="in" name="title" value="${esc(r.title || '')}"></label>
+        <label class="f">Тип<select class="in" name="type">${Object.entries(RECORD_TYPES).map(([k, v]) => `<option value="${k}" ${k === r.type ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+        <label class="f">Дата<input class="in" type="date" name="date" value="${esc(r.date || '')}"></label>
+        <label class="f">Клиника<input class="in" name="clinic" list="clist" value="${esc(clinic?.name || '')}"></label>
+        <label class="f">Врач<input class="in" name="doctor" list="dlist" value="${esc(doctor?.name || '')}"></label>
+        <datalist id="clist">${clinics.map(c => `<option value="${esc(c.name)}">`).join('')}</datalist>
+        <datalist id="dlist">${doctors.map(c => `<option value="${esc(c.name)}">`).join('')}</datalist>
+        <label class="f">Заключение<textarea class="in" name="conclusion">${esc(r.conclusion || '')}</textarea></label>
+      </section>
+      <section class="card"><h2>Разделы</h2>
+        <span class="sub" style="margin-top:-6px">Отметьте один или несколько. Снимите отметку, чтобы убрать запись из раздела.</span>
+        <div class="row" style="flex-wrap:wrap;gap:8px">${sections.map(s => `<label class="pill ${chosen.has(s.id) ? 'on' : ''}"><input type="checkbox" name="sec" value="${s.id}" ${chosen.has(s.id) ? 'checked' : ''} hidden>${esc(s.name)}</label>`).join('')}</div>
+      </section>
+      <section class="card">
+        <div class="between"><h2>Показатели · ${draft.rows.length}</h2><button type="button" class="linkbtn" id="addrow">+ Добавить</button></div>
+        <div class="rtable" id="rows"></div>
+      </section>
+      <button class="btn" type="submit">Сохранить изменения</button>
+    </form>`;
+  drawRows(p);
+  $$('label.pill input[name=sec]').forEach(i => i.onchange = () => i.parentElement.classList.toggle('on', i.checked));
+  $('#addrow').onclick = () => { syncRows(); draft.rows.push({ name: '', value: '', unit: '', refLow: '', refHigh: '' }); drawRows(p); };
+  $('#ref').onsubmit = async e => {
+    e.preventDefault(); syncRows();
+    const fd = new FormData(e.target);
+    let sectionIds = fd.getAll('sec').map(Number);
+    if (!sectionIds.length) { const other = sections.find(s => s.name === 'Прочее'); if (other) sectionIds = [other.id]; else { toast('Отметьте хотя бы один раздел'); return; } }
+    const date = fd.get('date') || null;
+    const clinicId = await getOrCreateByName(db.clinics, fd.get('clinic'));
+    const doctorId = await getOrCreateByName(db.doctors, fd.get('doctor'));
+    await db.transaction('rw', db.records, db.results, async () => {
+      await db.records.update(r.id, { title: fd.get('title').trim(), type: fd.get('type'), date, clinicId, doctorId, conclusion: (fd.get('conclusion') || '').trim(), sectionIds });
+      await db.results.where('recordId').equals(r.id).delete();
+      for (const row of draft.rows.filter(x => String(x.name).trim() && String(x.value).trim()))
+        await db.results.add({ recordId: r.id, profileId: p.id, date, ...Metrics.normalizeResult(row, p) });
+    });
+    draft = null;
+    toast('Сохранено');
+    location.hash = '#/record/' + r.id;
+  };
+}
+
+async function viewMetric(arg, range = 'all') {
+  const [metricId, qs] = arg.split('?');
+  const pid = +new URLSearchParams(qs || '').get('p');
+  if (pid) { const pp = await db.profiles.get(pid); if (pp) { settings.space = spaceOf(pp); settings.profileId = pid; } }
   const p = await currentProfile();
-  const rows = (await db.results.where('[profileId+metricId]').equals([p.id, metricId]).toArray())
+  if (!p) { location.hash = '#/'; return; }
+  const allRows = (await db.results.where('[profileId+metricId]').equals([p.id, metricId]).toArray())
     .filter(r => r.num !== null).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  const cut = range === '1y' ? addMonths(todayISO(), -12) : range === '3y' ? addMonths(todayISO(), -36) : '';
+  const rows = allRows.filter(r => !cut || (r.date || '') >= cut);
+  const reminders = (await db.reminders.where('profileId').equals(p.id).toArray()).filter(r => r.metricId === metricId && !r.done);
   const m = Metrics.byId(metricId);
   const name = Metrics.nameFor(metricId, rows[0]?.rawName);
   const last = rows[rows.length - 1];
@@ -342,15 +657,24 @@ async function viewMetric(metricId) {
         ${last ? `<div class="row" style="gap:8px;align-items:baseline"><span class="val ${last.status}" style="font-size:40px">${fmtNum(last.num)}</span><span class="sub" style="font-size:15px">${esc(last.unit)} · ${fmtDate(last.date)}</span></div>
           ${last.status === 'low' || last.status === 'high' ? `<span class="tag ${last.status}" style="align-self:flex-start">${STATUS_TEXT[last.status]}</span>` : ''}` : ''}
       </div>
-      <section class="card">${rows.length > 1 ? chart(rows) : '<p class="empty">График появится, когда будет хотя бы два значения.</p>'}</section>
+      <section class="card">
+        ${allRows.length > 1 ? `<div class="row" style="gap:6px">${[['1y', '1 год'], ['3y', '3 года'], ['all', 'Всё время']].map(([k, t]) => `<button type="button" class="pill ${range === k ? 'on' : ''}" data-range="${k}">${t}</button>`).join('')}</div>` : ''}
+        ${rows.length > 1 ? chart(rows) : '<p class="empty">График появится, когда будет хотя бы два значения' + (allRows.length > 1 ? ' за этот период' : '') + '.</p>'}</section>
+      ${reminders.map(r => `<section class="card" style="background:var(--accent-soft);flex-direction:row;align-items:center"><span class="grow"><b>${esc(r.title)}</b><br><span class="sub">${fmtDate(r.date)} · ${relDays(r.date)}</span></span><button type="button" class="pill" data-rdone="${r.id}">Сдано</button></section>`).join('')}
+      <button type="button" class="btn ghost" id="remind">Напомнить о пересдаче</button>
       <section class="card" id="info"></section>
       ${m?.tip ? `<section class="card"><h2>Как отслеживать</h2><p style="margin:0;font-size:14px;line-height:1.5">${esc(m.tip)}</p><span class="sub">Подсказка не заменяет консультацию врача.</span></section>` : ''}
       <section class="card"><h2>Все значения</h2>
-        ${rows.slice().reverse().map(r => `<a class="row" href="#/record/${r.recordId}" style="text-decoration:none;color:inherit;min-height:44px">
-          <span class="grow">${fmtDate(r.date)}</span><span class="val ${r.status}">${fmtNum(r.num)}</span><span class="sub">${esc(r.unit)}</span></a>`).join('') || '<p class="empty">Значений пока нет.</p>'}
+        ${allRows.slice().reverse().map(r => r.recordId ? `<a class="row" href="#/record/${r.recordId}" style="text-decoration:none;color:inherit;min-height:44px">
+          <span class="grow">${fmtDate(r.date)}</span><span class="val ${r.status}">${fmtNum(r.num)}</span><span class="sub">${esc(r.unit)}</span></a>`
+          : `<div class="row" style="min-height:44px"><span class="grow">${fmtDate(r.date)} <span class="sub">· вручную</span></span><span class="val ${r.status}">${fmtNum(r.num)}</span><span class="sub">${esc(r.unit)}</span><button type="button" class="pill" data-delres="${r.id}" aria-label="Удалить">✕</button></div>`).join('') || '<p class="empty">Значений пока нет.</p>'}
       </section>
     </div>
-    ${nav('')}`;
+    ${nav('dynamics')}`;
+  $$('[data-range]').forEach(b => b.onclick = () => viewMetric(arg, b.dataset.range));
+  $('#remind').onclick = () => reminderDialog(p.id, metricId, name);
+  $$('[data-rdone]').forEach(b => b.onclick = async () => { await db.reminders.update(+b.dataset.rdone, { done: true }); viewMetric(arg, range); });
+  $$('[data-delres]').forEach(b => b.onclick = async () => { if (confirm('Удалить это измерение?')) { await db.results.delete(+b.dataset.delres); viewMetric(arg, range); } });
   renderMetricInfo(metricId, name, last?.unit || m?.unit || '', p.kind);
 }
 
@@ -418,123 +742,6 @@ function chart(rows) {
 // ---------- загрузка ----------
 let draft = null;
 
-async function viewUpload() {
-  const profiles = await db.profiles.toArray();
-  if (!profiles.length) return viewOnboarding();
-  let p = await currentProfile();
-  const q = new URLSearchParams(location.hash.split('?')[1] || '');
-  const preSection = +q.get('section') || null;
-  if (draft && draft.stage === 'review') return viewReview();
-  const keep = q.has('prefilled') && draft && draft.files?.length ? draft : null;
-  draft = keep || { stage: 'pick', profileId: p.id, files: [], preSection };
-  if (q.has('shared')) draft.files = await Shared.take();
-  p = profiles.find(x => x.id === draft.profileId) || p;
-  app.innerHTML = `
-    <div class="top">${backLink('#/')}<h1 class="grow">Новая запись</h1></div>
-    <div class="pad stack">
-      <div class="stack" style="gap:8px"><span class="sub">Чья запись</span>
-        <div class="row" style="flex-wrap:wrap;gap:8px">${profiles.map(x => `<button type="button" class="pill ${x.id === p.id ? 'on' : ''}" data-who="${x.id}">${esc(x.name)}</button>`).join('')}</div></div>
-      <label class="drop">
-        <input type="file" id="files" multiple accept="image/*,.pdf,.docx,.doc,.xlsx,.xls,.csv,.txt">
-        <span class="badge" style="width:48px;height:48px;border-radius:14px;background:var(--accent-soft);color:var(--accent)">${ICONS.upload.replace('<svg', '<svg width="24" height="24"')}</span>
-        <span><span style="font-weight:600;display:block">Фото, PDF, Word или Excel</span><span class="sub">Можно несколько файлов с одного приёма — они станут одной записью</span></span>
-      </label>
-      ${draft.fromInbox ? '<span class="sub">Файлы из письма — выберите, чья это запись, и нажмите «Распознать».</span>' : ''}
-      <ul class="files" id="flist" style="margin:0;padding-left:18px"></ul>
-      <button type="button" class="btn" id="recognize" disabled>Распознать</button>
-      <button type="button" class="btn ghost" id="justsave" disabled>Сохранить без распознавания</button>
-      <p class="progress" id="prog"></p>
-    </div>
-    ${nav('upload')}`;
-  $$('[data-who]').forEach(b => b.onclick = () => { draft.profileId = +b.dataset.who; $$('[data-who]').forEach(x => x.classList.toggle('on', x === b)); });
-  const showFiles = () => {
-    $('#flist').innerHTML = draft.files.map(f => `<li>${esc(f.name)} <span class="sub">${(f.size / 1024 / 1024).toFixed(1)} МБ</span></li>`).join('');
-    $('#recognize').disabled = $('#justsave').disabled = !draft.files.length;
-  };
-  $('#files').onchange = e => { draft.files = draft.files.concat([...e.target.files]); showFiles(); };
-  showFiles();
-  $('#recognize').onclick = recognize;
-  $('#justsave').onclick = () => { draft.parsed = { docType: 'document', results: [] }; draft.text = ''; draft.stage = 'review'; viewReview(); };
-}
-
-async function recognize() {
-  const prog = $('#prog'); const btns = [$('#recognize'), $('#justsave')];
-  btns.forEach(b => b.disabled = true);
-  try {
-    let text = '', notes = [];
-    for (const [i, f] of draft.files.entries()) {
-      prog.textContent = `Читаю файл ${i + 1} из ${draft.files.length}: ${f.name}`;
-      let out;
-      try { out = await Extract.run(f); } catch (e) { notes.push(`${f.name}: не удалось прочитать (${e.message})`); continue; }
-      if (out.unsupported) { notes.push(`${f.name}: ${out.unsupported}`); continue; }
-      if (out.text) text += `\n\n=== ${f.name} ===\n${out.text}`;
-      if (out.images) for (const [j, img] of out.images.entries()) {
-        prog.textContent = `Распознаю ${f.name}, страница ${j + 1} из ${out.images.length}`;
-        const r = await api('ocr', { image: img });
-        text += `\n\n=== ${f.name}, стр. ${j + 1} ===\n${r.text || ''}`;
-      }
-    }
-    if (!text.trim()) throw new Error(notes.join('\n') || 'В файлах не нашлось текста.');
-    prog.textContent = 'Разбираю показатели…';
-    const p = await db.profiles.get(draft.profileId);
-    const sections = await db.sections.where('profileId').equals(p.id).toArray();
-    const parsed = await api('parse', { text: text.slice(0, 30000), profileKind: p.kind, sections: sections.map(s => s.name) });
-    draft.text = text.trim(); draft.parsed = parsed; draft.notes = notes; draft.stage = 'review';
-    viewReview();
-  } catch (e) {
-    prog.textContent = '';
-    toast(e.message);
-    btns.forEach(b => b.disabled = false);
-  }
-}
-
-async function viewReview() {
-  const d = draft, pz = d.parsed || {};
-  const p = await db.profiles.get(d.profileId);
-  const sections = (await db.sections.where('profileId').equals(p.id).toArray()).sort((a, b) => a.order - b.order);
-  const clinics = await db.clinics.toArray(), doctors = await db.doctors.toArray();
-  const hints = (pz.sectionHints || []).map(h => String(h).toLowerCase());
-  const pre = new Set(sections.filter(s => s.id === d.preSection || hints.includes(s.name.toLowerCase())).map(s => s.id));
-  if (!pre.size) {
-    // если ИИ не подсказал — берём раздел первого распознанного показателя
-    const m = (pz.results || []).map(r => Metrics.match(r.name)).find(Boolean);
-    const s = m && sections.find(s => s.name === m.section) || sections.find(s => /анализ/i.test(s.name));
-    if (s && (pz.results || []).length) pre.add(s.id);
-  }
-  const unsure = new Set(pz.uncertain || []);
-  d.rows = d.rows || (pz.results || []).map(r => ({ ...r }));
-  app.innerHTML = `
-    <div class="top"><button type="button" class="back linkbtn" id="cancel" aria-label="Отменить" style="color:var(--ink)">✕</button><h1 class="grow">Проверьте запись</h1></div>
-    <form id="rev" class="pad stack">
-      ${d.notes?.length ? `<div class="card" style="background:var(--high-soft)"><span style="font-size:14px">${d.notes.map(esc).join('<br>')}</span></div>` : ''}
-      <section class="card">
-        <span class="sub">${esc(p.name)} · файлов: ${d.files.length}</span>
-        ${pz.patientName ? `<span class="sub">Пациент в документе: <b>${esc(pz.patientName)}</b>. Если это не ${esc(p.name)}, вернитесь назад и выберите другой профиль.</span>` : ''}
-        <label class="f ${unsure.has('title') ? 'warn' : ''}">Название<input class="in" name="title" value="${esc(pz.title || '')}" placeholder="Например, Общий анализ крови"></label>
-        <label class="f">Тип<select class="in" name="type">${Object.entries(RECORD_TYPES).map(([k, v]) => `<option value="${k}" ${k === (pz.docType || 'document') ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
-        <label class="f ${unsure.has('date') ? 'warn' : ''}">Дата ${unsure.has('date') ? '— проверьте, распознано неуверенно' : ''}<input class="in" type="date" name="date" value="${esc(pz.date || '')}"></label>
-        <label class="f ${unsure.has('clinic') ? 'warn' : ''}">Клиника ${unsure.has('clinic') ? '— проверьте' : ''}<input class="in" name="clinic" list="clist" value="${esc(pz.clinic || '')}"></label>
-        <label class="f ${unsure.has('doctor') ? 'warn' : ''}">Врач ${unsure.has('doctor') ? '— проверьте' : ''}<input class="in" name="doctor" list="dlist" value="${esc(pz.doctor || '')}"></label>
-        <datalist id="clist">${clinics.map(c => `<option value="${esc(c.name)}">`).join('')}</datalist>
-        <datalist id="dlist">${doctors.map(c => `<option value="${esc(c.name)}">`).join('')}</datalist>
-        ${pz.conclusion !== undefined ? `<label class="f">Заключение<textarea class="in" name="conclusion">${esc(pz.conclusion || '')}</textarea></label>` : ''}
-      </section>
-      <section class="card"><h2>Разделы</h2>
-        <div class="row" style="flex-wrap:wrap;gap:8px">${sections.map(s => `<label class="pill ${pre.has(s.id) ? 'on' : ''}"><input type="checkbox" name="sec" value="${s.id}" ${pre.has(s.id) ? 'checked' : ''} hidden>${esc(s.name)}</label>`).join('')}</div>
-      </section>
-      <section class="card">
-        <div class="between"><h2>Показатели · ${d.rows.length}</h2><button type="button" class="linkbtn" id="addrow">+ Добавить</button></div>
-        <div class="rtable" id="rows"></div>
-      </section>
-      <button class="btn" type="submit">Сохранить в архив</button>
-    </form>`;
-  drawRows(p);
-  $$('label.pill input[name=sec]').forEach(i => i.onchange = () => i.parentElement.classList.toggle('on', i.checked));
-  $('#addrow').onclick = () => { syncRows(); d.rows.push({ name: '', value: '', unit: '', refLow: '', refHigh: '' }); drawRows(p); };
-  $('#cancel').onclick = () => { if (confirm('Отменить загрузку?')) { draft = null; location.hash = '#/'; render(); } };
-  $('#rev').onsubmit = async e => { e.preventDefault(); syncRows(); await saveDraft(new FormData(e.target)); };
-}
-
 function drawRows(p) {
   $('#rows').innerHTML = draft.rows.map((r, i) => {
     const n = Metrics.normalizeResult(r, p);
@@ -550,50 +757,14 @@ function drawRows(p) {
     </div>`;
   }).join('') || '<p class="empty">Числовых показателей не найдено — это нормально для протоколов и заключений.</p>';
   $$('[data-del]').forEach(b => b.onclick = () => { syncRows(); draft.rows.splice(+b.dataset.del, 1); drawRows(p); });
-  $$('#rows .rrow input').forEach(i => i.onchange = () => { syncRows(); drawRows(p); });
+  // перерисовку откладываем: change приходит в момент потери фокуса, и замена узлов прямо в нём ломает браузер
+  $$('#rows .rrow input').forEach(i => i.onchange = () => { syncRows(); setTimeout(() => { if ($('#rows') && draft) drawRows(p); }, 0); });
 }
 function syncRows() {
   $$('#rows .rrow').forEach(row => {
     const r = draft.rows[+row.dataset.i];
     $$('input[data-k]', row).forEach(inp => r[inp.dataset.k] = inp.value);
   });
-}
-
-async function saveDraft(fd) {
-  const d = draft;
-  const p = await db.profiles.get(d.profileId);
-  const sectionIds = fd.getAll('sec').map(Number);
-  if (!sectionIds.length) {
-    const other = await db.sections.where('profileId').equals(p.id).filter(s => s.name === 'Прочее').first();
-    if (other) sectionIds.push(other.id);
-  }
-  const date = fd.get('date') || null;
-  const clinicId = await getOrCreateByName(db.clinics, fd.get('clinic'));
-  const doctorId = await getOrCreateByName(db.doctors, fd.get('doctor'));
-  const unknown = [];
-  await db.transaction('rw', db.records, db.files, db.results, async () => {
-    const recordId = await db.records.add({
-      profileId: p.id, date, type: fd.get('type'), title: fd.get('title').trim(), clinicId, doctorId, sectionIds,
-      conclusion: (fd.get('conclusion') || '').trim(), text: d.text || '', notes: '', explanation: null, createdAt: new Date().toISOString()
-    });
-    for (const f of d.files) await db.files.add({ recordId, name: f.name, mime: f.type, size: f.size, blob: f });
-    const rows = d.rows.filter(r => String(r.name).trim() && String(r.value).trim());
-    for (const r of rows) {
-      const n = Metrics.normalizeResult(r, p);
-      if (n.metricId.startsWith('raw:')) unknown.push(r.name);
-      await db.results.add({ recordId, profileId: p.id, date, ...n });
-    }
-  });
-  // копим нераспознанные названия — позже (с согласия) уйдут в общий справочник без значений
-  if (unknown.length) {
-    const kv = (await db.kv.get('unknownMetrics')) || { key: 'unknownMetrics', value: [] };
-    kv.value = [...new Set([...kv.value, ...unknown])];
-    await db.kv.put(kv);
-  }
-  if (d.fromInbox) await MailInbox.ack(d.fromInbox).catch(() => {});
-  draft = null;
-  toast('Сохранено в архив');
-  location.hash = sectionIds[0] ? '#/section/' + sectionIds[0] : '#/';
 }
 
 // ---------- настройки ----------
@@ -616,13 +787,14 @@ async function viewSettings() {
         <a class="btn ghost" href="#/inbox">Входящие из почты</a>
         <span class="sub">Без агента: в почтовом приложении откройте вложение → «Поделиться» → «Healthy Family».</span>
       </section>
+      ${await backupCard()}
       <section class="card"><h2>Данные на телефоне</h2>
         <div class="between"><span>Занято</span><span class="sub">${usage || '—'}</span></div>
         <div class="between"><span>Защита от автоочистки</span><span class="tag ${persisted ? 'normal' : 'high'}">${persisted ? 'Включена' : 'Не включена'}</span></div>
         ${persisted ? '' : '<button type="button" class="btn ghost" id="persist">Включить защиту</button><span class="sub">Если браузер не разрешает — установите приложение на главный экран и попробуйте снова.</span>'}
         <button type="button" class="btn ghost" id="export">Скачать весь архив одним файлом</button>
         <label class="btn ghost" style="cursor:pointer">Восстановить из файла<input type="file" id="import" accept=".json,application/json" hidden></label>
-        <span class="sub">Пока нет облачного бэкапа, скачивайте архив после крупных загрузок и храните файл в надёжном месте.</span>
+        <span class="sub">Файл архива — дополнительная страховка к облачной копии. Он не зашифрован, поэтому храните его в надёжном месте.</span>
       </section>
       <section class="card"><h2>Профили</h2>
         ${profiles.map(x => `<a class="between" href="#/profile/${x.id}" style="text-decoration:none;color:inherit;min-height:40px;align-items:center"><span>${esc(x.name)}</span><span class="sub">${x.kind === 'pet' ? 'питомец' : x.kind === 'child' ? 'ребёнок' : 'взрослый'} · анамнез ›</span></a>`).join('')}
@@ -653,6 +825,7 @@ async function viewSettings() {
   };
   const ps = $('#persist');
   if (ps) ps.onclick = async () => { const ok = await navigator.storage.persist(); toast(ok ? 'Защита включена' : 'Браузер пока не разрешил'); viewSettings(); };
+  bindBackupCard(() => viewSettings());
   $('#checkupd').onclick = async () => {
     toast('Проверяю…');
     try {
@@ -682,7 +855,24 @@ const routes = [
   [/^#\/sections$/, viewSections],
   [/^#\/section\/(\d+)$/, viewSection],
   [/^#\/record\/(\d+)$/, viewRecord],
+  [/^#\/record\/edit\/(\d+)$/, viewRecordEdit],
+  [/^#\/sections\/edit$/, viewSectionsEdit],
+  [/^#\/profile\/edit\/(\d+)$/, viewProfileEdit],
   [/^#\/metric\/(.+)$/, m => viewMetric(decodeURIComponent(m))],
+  [/^#\/calendar/, viewCalendar],
+  [/^#\/backup\/restore$/, viewBackupRestore],
+  [/^#\/dynamics$/, viewDynamics],
+  [/^#\/measure\/new$/, viewMeasureNew],
+  [/^#\/meds\/(\d+)$/, viewMeds],
+  [/^#\/med\/new\/(\d+)$/, pid => viewMedForm('new', pid)],
+  [/^#\/med\/(\d+)$/, id => viewMedForm('edit', id)],
+  [/^#\/vaccines\/(\d+)$/, viewVaccines],
+  [/^#\/vaccine\/new\/(\d+)$/, pid => viewVaccineForm('new', pid)],
+  [/^#\/vaccine\/(\d+)$/, id => viewVaccineForm('edit', id)],
+  [/^#\/cycle\/(\d+)$/, viewCycle],
+  [/^#\/pollen\/(\d+)$/, viewPollen],
+  [/^#\/emergency\/(\d+)$/, viewEmergency],
+  [/^#\/summary\/(\d+)$/, viewSummary],
   [/^#\/upload/, viewUpload],
   [/^#\/settings$/, viewSettings],
   [/^#\/inbox$/, viewInbox],
@@ -690,7 +880,7 @@ const routes = [
   [/^#\/doc\/new\/(\d+)$/, pid => viewDocForm('new', pid)],
   [/^#\/doc\/edit\/(\d+)$/, id => viewDocForm('edit', id)],
   [/^#\/doc\/(\d+)$/, viewDoc],
-  [/^#\/profile\/new$/, viewProfileNew],
+  [/^#\/profile\/new/, viewProfileNew],
   [/^#\/profile\/(\d+)$/, viewProfile],
   [/^#\/history\/new\/(\w+)\/(\d+)$/, (k, pid) => viewHistoryForm('new', k, pid)],
   [/^#\/history\/(\d+)$/, id => viewHistoryForm(id)]
@@ -749,7 +939,7 @@ async function setupUpdates() {
   let reloading = false;
   // новая версия взяла управление → один раз перезагружаемся, чтобы показать её
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (!hadController || reloading || (draft && draft.stage === 'review')) return;
+    if (!hadController || reloading || (draft && (draft.stage === 'review' || draft.busy))) return;
     reloading = true; location.reload();
   });
   try { swReg = await navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }); } catch (e) { return; }
@@ -768,6 +958,7 @@ function announceVersion() {
   await Metrics.load();
   if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
   setupUpdates();
+  Backup.init();
   render();
   announceVersion();
 })();

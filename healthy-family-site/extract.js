@@ -10,7 +10,6 @@ const Extract = (() => {
     return loaded[src];
   }
 
-  const MAX_PAGES = 10;
 
   function kindOf(file) {
     const n = file.name.toLowerCase();
@@ -36,7 +35,9 @@ const Extract = (() => {
     return url.split(',')[1];
   }
 
-  async function pdf(file) {
+  // PDF: текстовый слой читаем сразу; если это скан — отдаём функцию, которая рендерит страницу по запросу.
+  // Так 30–40 страниц не держатся в памяти разом: каждая страница рендерится прямо перед распознаванием.
+  async function pdf(file, maxPages) {
     await loadScript('pdf.min.js');
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'pdf.worker.min.js';
     const data = await file.arrayBuffer();
@@ -49,8 +50,8 @@ const Extract = (() => {
       if (!pw) throw new Error('файл защищён паролем');
       doc = await pdfjsLib.getDocument({ data: data.slice(0), password: pw }).promise;
     }
-    const pages = Math.min(doc.numPages, MAX_PAGES);
-    let text = '';
+    const total = doc.numPages, pages = Math.min(total, maxPages);
+    const texts = [];
     for (let i = 1; i <= pages; i++) {
       const page = await doc.getPage(i);
       const tc = await page.getTextContent();
@@ -60,23 +61,35 @@ const Extract = (() => {
         const y = Math.round(it.transform[5]);
         lines.set(y, (lines.get(y) || []).concat({ x: it.transform[4], s: it.str }));
       }
-      [...lines.entries()].sort((a, b) => b[0] - a[0]).forEach(([, items]) => {
-        text += items.sort((a, b) => a.x - b.x).map(i => i.s).join('  ') + '\n';
-      });
-      text += '\n';
+      texts.push([...lines.entries()].sort((a, b) => b[0] - a[0]).map(([, items]) => items.sort((a, b) => a.x - b.x).map(i => i.s).join('  ')).join('\n'));
     }
-    if (text.replace(/\s/g, '').length > 80 * pages) return { text };
-    // это скан — рендерим страницы в картинки
-    const images = [];
-    for (let i = 1; i <= pages; i++) {
-      const page = await doc.getPage(i);
-      const vp = page.getViewport({ scale: 2 });
-      const c = document.createElement('canvas');
-      c.width = vp.width; c.height = vp.height;
-      await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
-      images.push(await imageToJpegB64(c));
-    }
-    return { images };
+    const truncated = total > pages ? total - pages : 0;
+    if (texts.join('').replace(/\s/g, '').length > 80 * pages) return { pageTexts: texts, pageCount: pages, truncated };
+    return {
+      pageCount: pages, truncated,
+      renderPage: async i => {
+        const page = await doc.getPage(i + 1);
+        const vp = page.getViewport({ scale: 1.8 });
+        const c = document.createElement('canvas');
+        c.width = vp.width; c.height = vp.height;
+        await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+        const b64 = await imageToJpegB64(c);
+        c.width = c.height = 0; // сразу освобождаем память
+        return b64;
+      }
+    };
+  }
+
+  // Число страниц без распознавания — чтобы заранее показать лимит
+  async function countPages(file) {
+    const k = kindOf(file);
+    if (k !== 'pdf') return 1;
+    try {
+      await loadScript('pdf.min.js');
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'pdf.worker.min.js';
+      const doc = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+      const n = doc.numPages; doc.destroy(); return n;
+    } catch (e) { return 1; }
   }
 
   async function docx(file) {
@@ -91,16 +104,17 @@ const Extract = (() => {
     return { text: wb.SheetNames.map(n => '# ' + n + '\n' + XLSX.utils.sheet_to_csv(wb.Sheets[n], { FS: ' ; ' })).join('\n\n') };
   }
 
-  async function run(file) {
+  // Единый ответ: { pageTexts[] } — текст по страницам, или { pageCount, renderPage(i) } — картинки для OCR
+  async function run(file, maxPages = 40) {
     const k = kindOf(file);
-    if (k === 'image') return { images: [await imageToJpegB64(file)] };
-    if (k === 'pdf') return pdf(file);
-    if (k === 'docx') return docx(file);
-    if (k === 'sheet') return sheet(file);
-    if (k === 'txt') return { text: await file.text() };
+    if (k === 'image') return { pageCount: 1, renderPage: () => imageToJpegB64(file) };
+    if (k === 'pdf') return pdf(file, maxPages);
+    if (k === 'docx') return { pageTexts: [(await docx(file)).text] };
+    if (k === 'sheet') return { pageTexts: [(await sheet(file)).text] };
+    if (k === 'txt') return { pageTexts: [await file.text()] };
     if (k === 'doc') return { unsupported: 'Старый формат .doc не читается — сохраните файл как .docx или PDF. Сам файл в архив сохранится.' };
     return { unsupported: 'Этот формат пока не распознаётся, но файл сохранится в архиве.' };
   }
 
-  return { run, kindOf };
+  return { run, kindOf, countPages };
 })();

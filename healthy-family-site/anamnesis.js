@@ -161,16 +161,25 @@ async function viewProfile(id) {
   const preg = all.filter(h => h.kind === 'pregnancy');
   const births = preg.filter(h => h.outcome === 'birth' || h.outcome === 'cesarean').length;
   app.innerHTML = `
-    <div class="top">${backLink('#/')}<div class="grow"><div class="sub">Профиль и анамнез</div><h1>${esc(p.name)}</h1></div></div>
+    <div class="top">${backLink('#/')}<div class="grow"><div class="sub">${p.kind === 'pet' ? esc([p.species, p.breed].filter(Boolean).join(' · ') || 'Питомец') : 'Профиль и анамнез'}</div><h1>${esc(p.name)}</h1></div>
+      <a class="pill" href="#/profile/edit/${p.id}" style="text-decoration:none;color:inherit">Изменить</a></div>
     <div class="pad stack">
-      <section class="card">
+      <div class="grid2">
+        <a class="tile" href="#/meds/${p.id}"><span style="font-weight:600">Лекарства</span><span class="sub">Курсы и приём</span></a>
+        <a class="tile" href="#/vaccines/${p.id}"><span style="font-weight:600">Прививки</span><span class="sub">${p.kind === 'pet' ? 'И обработки' : 'Нацкалендарь РФ'}</span></a>
+        ${isFemale(p) ? `<a class="tile" href="#/cycle/${p.id}"><span style="font-weight:600">Цикл</span><span class="sub">Календарь месячных</span></a>` : ''}
+        ${p.kind !== 'pet' ? `<a class="tile" href="#/pollen/${p.id}"><span style="font-weight:600">Пыльца</span><span class="sub">Сезоны цветения</span></a>` : ''}
+        <a class="tile" href="#/emergency/${p.id}"><span style="font-weight:600">Экстренная карта</span><span class="sub">Показать в один тап</span></a>
+        <a class="tile" href="#/summary/${p.id}"><span style="font-weight:600">Сводка для врача</span><span class="sub">Для печати или PDF</span></a>
+      </div>
+      ${p.kind === 'pet' ? '' : `<section class="card">
         <div class="between"><h2>Основное</h2></div>
         <div class="grid2" style="gap:10px">
           <label class="f">Группа крови<select class="in" id="blood">${['', '0 (I)', 'A (II)', 'B (III)', 'AB (IV)'].map(v => `<option ${p.blood === v ? 'selected' : ''} value="${v}">${v || 'Не знаю'}</option>`).join('')}</select></label>
           <label class="f">Резус<select class="in" id="rh">${['', 'Rh+', 'Rh−'].map(v => `<option ${p.rh === v ? 'selected' : ''} value="${v}">${v || 'Не знаю'}</option>`).join('')}</select></label>
         </div>
         ${p.kind === 'adult' && p.sex !== 'm' && preg.length ? `<span class="sub">Беременностей: ${preg.length}, родов: ${births}</span>` : ''}
-      </section>
+      </section>`}
       ${await docsCard(p)}
       ${Object.entries(HISTORY_KINDS).filter(([, k]) => !k.only || k.only(p)).map(([kind, k]) => {
         const items = all.filter(h => h.kind === kind).sort((a, b) => String(b.year || '').localeCompare(String(a.year || '')));
@@ -183,7 +192,7 @@ async function viewProfile(id) {
     </div>
     ${nav('')}`;
   const save = () => db.profiles.update(p.id, { blood: $('#blood').value, rh: $('#rh').value }).then(() => toast('Сохранено'));
-  $('#blood').onchange = save; $('#rh').onchange = save;
+  if ($('#blood')) { $('#blood').onchange = save; $('#rh').onchange = save; }
 }
 
 async function viewHistoryForm(idOrNew, kindArg, profileArg) {
@@ -223,7 +232,9 @@ async function viewHistoryForm(idOrNew, kindArg, profileArg) {
 
   let code = h.code || null;
   const ac = $('#ac');
-  if (ac) {
+  // у питомцев МКБ-10 (человеческая классификация) не подсказываем — диагноз пишется свободным текстом
+  if (ac && p.kind === 'pet' && k.icd) { ac.placeholder = 'Например, отит, дерматит, гастрит'; }
+  else if (ac) {
     const setCode = c => { code = c; $('#codebox') && ($('#codebox').style.display = c ? 'flex' : 'none'); $('#codeval') && ($('#codeval').textContent = c || ''); };
     attachAutocomplete(ac, {
       source: k.icd ? 'icd' : 'surgery',

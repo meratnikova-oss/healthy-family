@@ -83,7 +83,7 @@ async function viewDoc(id) {
       <a class="pill" href="#/doc/edit/${d.id}" style="text-decoration:none;color:inherit">Изменить</a></div>
     <div class="pad stack">
       ${urls.filter(f => f.mime?.startsWith('image/')).map(f => `<img src="${f.url}" alt="${esc(f.name)}" class="docimg" data-open="${f.id}">`).join('')}
-      ${urls.filter(f => !f.mime?.startsWith('image/')).map(f => `<button type="button" class="pill" data-open="${f.id}">${esc(f.name)}</button>`).join('')}
+      ${urls.filter(f => !f.mime?.startsWith('image/')).map(f => `<button type="button" class="pill" data-open="${f.id}">Открыть файл ↗</button>`).join('')}
       <section class="card">
         ${d.number ? `<div><div class="sub">${esc((t.number || 'Номер').replace(/ \(.*\)/, ''))}</div>
           <div class="row"><span class="val grow" style="font-size:20px;letter-spacing:.04em;word-break:break-all">${esc([d.series, d.number].filter(Boolean).join(' '))}</span>
