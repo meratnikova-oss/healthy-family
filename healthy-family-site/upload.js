@@ -394,7 +394,7 @@ async function viewReview() {
   const q = d.queue, last = !q || d.qi === q.length - 1;
   const pages = totalPages(d.files);
   app.innerHTML = `
-    <div class="top"><button type="button" class="back linkbtn" id="cancel" aria-label="Отменить" style="color:var(--ink)">✕</button><h1 class="grow">${q ? `Документ ${d.qi + 1} из ${q.length}` : 'Проверьте запись'}</h1></div>
+    <div class="top"><button type="button" class="back linkbtn" id="cancel" aria-label="Отменить" style="color:var(--ink)">✕</button><h1 class="grow">${q ? `Документ ${d.qi + 1} из ${q.length}` : d.replaceId ? 'Новое распознавание' : 'Проверьте запись'}</h1></div>
     <form id="rev" class="pad stack">
       ${d.notes?.length ? `<div class="card" style="background:var(--high-soft)"><span style="font-size:14px">${d.notes.map(esc).join('<br>')}</span></div>` : ''}
       <div class="tray-row">${d.files.map((f, i) => { if (isImageFile(f) && !f._u) f._u = URL.createObjectURL(f); return `<button type="button" class="tthumb" data-open="${i}" aria-label="Открыть страницу ${i + 1}">${isImageFile(f) ? `<img src="${f._u}" alt="">` : `<span class="text">${esc(fileExt(f))}</span>`}<span class="tnum">${i + 1}</span></button>`; }).join('')}</div>
@@ -418,7 +418,8 @@ async function viewReview() {
         <div class="between"><h2>Показатели · ${d.rows.length}</h2><button type="button" class="linkbtn" id="addrow">+ Добавить</button></div>
         <div class="rtable" id="rows"></div>
       </section>
-      <button class="btn" type="submit">${q ? (last ? 'Сохранить и закончить' : 'Сохранить и дальше') : 'Сохранить в архив'}</button>
+      ${d.replaceId ? '<span class="sub">Сохранение заменит показатели в этой же записи. Новая запись не появится, оригиналы и заметки останутся.</span>' : ''}
+      <button class="btn" type="submit">${q ? (last ? 'Сохранить и закончить' : 'Сохранить и дальше') : d.replaceId ? 'Заменить в записи' : 'Сохранить в архив'}</button>
       ${q ? `<button type="button" class="btn ghost" id="skip">${last ? 'Пропустить и закончить' : 'Пропустить этот документ'}</button>` : ''}
     </form>`;
   drawRows(p);
@@ -427,7 +428,7 @@ async function viewReview() {
   $$('[data-sentimg]').forEach(b => b.onclick = () => { const w = document.createElement('div'); w.className = 'sheet'; w.innerHTML = `<div class="card sheet-card" style="padding:8px"><img src="data:image/jpeg;base64,${d.sentImages[+b.dataset.sentimg]}" style="width:100%;border-radius:10px"><button type="button" class="btn ghost">Закрыть</button></div>`; document.body.appendChild(w); w.querySelector('button').onclick = () => w.remove(); w.onclick = e => { if (e.target === w) w.remove(); }; });
   $$('[data-open]').forEach(b => b.onclick = () => { const f = d.files[+b.dataset.open]; const u = URL.createObjectURL(f); window.open(u, '_blank'); setTimeout(() => URL.revokeObjectURL(u), 60000); });
   $('#addrow').onclick = () => { syncRows(); d.rows.push({ name: '', value: '', unit: '', refLow: '', refHigh: '' }); drawRows(p); };
-  $('#cancel').onclick = q ? stopQueue : () => { if (confirm('Отменить загрузку? Снимки останутся в лотке, их можно распознать позже.')) { draft = null; location.hash = '#/'; render(); } };
+  $('#cancel').onclick = q ? stopQueue : d.replaceId ? () => { const id = d.replaceId; draft = null; viewRecord(id); } : () => { if (confirm('Отменить загрузку? Снимки останутся в лотке, их можно распознать позже.')) { draft = null; location.hash = '#/'; render(); } };
   const sk = $('#skip'); if (sk) sk.onclick = () => nextInQueue();
   $('#rev').onsubmit = async e => { e.preventDefault(); syncRows(); await saveDraft(new FormData(e.target)); };
   window.scrollTo(0, 0);
@@ -466,6 +467,23 @@ async function saveDraft(fd) {
   const doctorId = await getOrCreateByName(db.doctors, fd.get('doctor'));
   const unknown = [];
   let recordId;
+  // «Распознать заново»: та же запись обновляется на месте — файлы, заметки и расшифровка не дублируются
+  if (d.replaceId && await db.records.get(d.replaceId)) {
+    recordId = d.replaceId;
+    await db.transaction('rw', db.records, db.results, async () => {
+      await db.records.update(recordId, { date, type: fd.get('type'), title: fd.get('title').trim(), clinicId, doctorId, sectionIds,
+        conclusion: (fd.get('conclusion') || '').trim(), text: d.text || '' });
+      await db.results.where('recordId').equals(recordId).delete();
+      for (const r of d.rows.filter(r => String(r.name).trim() && String(r.value).trim())) await db.results.add({ recordId, profileId: p.id, date, ...Metrics.normalizeResult(r, p) });
+    });
+    const old = (await db.records.get(recordId)).visit;
+    if (visit && old?.reminderId) visit.reminderId = old.reminderId;
+    if (visit) await applyVisit(p.id, recordId, visit, fd.get('doctor'), date);
+    draft = null;
+    toast('Запись распознана заново');
+    if (location.hash === '#/record/' + recordId) viewRecord(recordId); else location.hash = '#/record/' + recordId;
+    return;
+  }
   await db.transaction('rw', db.records, db.files, db.results, async () => {
     recordId = await db.records.add({
       profileId: p.id, date, type: fd.get('type'), title: fd.get('title').trim(), clinicId, doctorId, sectionIds,
@@ -488,9 +506,8 @@ async function saveDraft(fd) {
   }
   if (d.queue) { d.saved = (d.saved || 0) + 1; toast('Сохранено'); nextInQueue(); return; }
   if (d.fromInbox) await MailInbox.ack(d.fromInbox).catch(() => {});
-  if (d.replaceId) await deleteRecord(d.replaceId);
   draft = null; trayClear();
-  toast(d.replaceId ? 'Запись распознана заново' : 'Сохранено в архив');
+  toast('Сохранено в архив');
   location.hash = sectionIds[0] ? '#/section/' + sectionIds[0] : '#/';
 }
 
@@ -513,4 +530,24 @@ function bindOriginals() {
     window.open(u, '_blank');
     setTimeout(() => URL.revokeObjectURL(u), 60000);
   });
+}
+
+// «Распознать заново» одной записи: сразу распознаём её оригиналы как один документ и открываем проверку.
+// Сохранение обновит ту же запись, ничего не добавляя.
+async function rerunRecord(r, files) {
+  if (!(await Plan.gate('Распознать заново'))) return;
+  const p = await db.profiles.get(r.profileId);
+  draft = { stage: 'pick', profileId: r.profileId, mode: 'one', busy: true, replaceId: r.id, keepSections: r.sectionIds || [],
+    files: files.map(f => new File([f.blob], f.name || 'файл', { type: f.mime })) };
+  app.innerHTML = `<div class="top"><h1 class="grow">Распознаю заново</h1></div>
+    <div class="pad stack"><section class="card"><h2>${esc(r.title || RECORD_TYPES[r.type] || 'Документ')}</h2>
+      <div id="progbox" class="stack" style="gap:6px"><div class="pbar"><i id="pfill"></i></div><p class="progress" id="prog" style="margin:0">Начинаю…</p></div>
+      <span class="sub">Оригиналы, заметки и расшифровка останутся в записи. Обновятся показатели и поля, которые вы проверите на следующем экране.</span></section></div>`;
+  try {
+    const res = await recognizeFiles(draft.files, p, setProgress);
+    Object.assign(draft, { text: res.text, sentText: res.sentText, sentImages: res.sentImages, parsed: res.parsed, notes: res.notes, stage: 'review', rows: undefined, busy: false });
+    viewReview();
+  } catch (e) {
+    draft = null; toast(e.message); viewRecord(r.id);
+  }
 }

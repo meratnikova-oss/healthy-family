@@ -1,4 +1,4 @@
-const APP_VERSION = '0.13.0';
+const APP_VERSION = '0.13.1';
 const app = document.getElementById('app');
 
 // ---------- утилиты ----------
@@ -538,10 +538,7 @@ async function viewRecord(id, tab = 'results') {
     </div>
     ${nav('')}`;
   const rr = $('#rerun');
-  if (rr) rr.onclick = () => {
-    draft = { stage: 'pick', profileId: r.profileId, files: files.map(f => new File([f.blob], f.name || 'файл', { type: f.mime })), replaceId: r.id, keepSections: r.sectionIds || [], keepNotes: r.notes || '', preSection: (r.sectionIds || [])[0] || null };
-    location.hash = '#/upload?prefilled';
-  };
+  if (rr) rr.onclick = () => rerunRecord(r, files);
 
   const body = $('#tabbody');
   if (tab === 'results') {

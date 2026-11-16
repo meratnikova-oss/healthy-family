@@ -1,5 +1,5 @@
 // Офлайн-оболочка приложения. VERSION меняйте при каждом выпуске — так очищается старый кэш.
-const VERSION = 'v0.13.0';
+const VERSION = 'v0.13.1';
 const SHARE_CACHE = 'share-inbox'; // файлы, пришедшие через «Поделиться»
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'db.js', 'metrics.js', 'extract.js', 'anamnesis.js', 'mailbox.js', 'iddocs.js', 'care.js', 'health.js', 'backup.js', 'upload.js', 'config.js', 'anon.js', 'ocr.js', 'plan.js', 'legal.js', 'info.js', 'visit.js', 'rx.js', 'dupes.js', 'rerun.js', 'timeline.js', 'icd10.json', 'icd10-aliases.json',
   'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png',
