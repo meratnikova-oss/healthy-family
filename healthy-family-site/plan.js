@@ -52,7 +52,7 @@ function aiConsentDialog() {
     d.className = 'sheet';
     d.innerHTML = `<div class="card sheet-card" role="dialog" aria-modal="true" aria-labelledby="aicT">
       <h2 id="aicT">Перед первым распознаванием</h2>
-      <p style="margin:0">Чтобы ИИ перенёс показатели, приложение отправит ему текст документа. Перед отправкой прямо на телефоне из текста удаляются <b>ФИО, дата рождения, адрес, телефон, номера полиса, СНИЛС и паспорта</b>. Фото на сервер не уходят — они распознаются здесь, на телефоне.</p>
+      <p style="margin:0">Чтобы ИИ перенёс показатели, приложение отправит ему текст документа. Перед отправкой прямо на телефоне из текста удаляются <b>ФИО, дата рождения, адрес, телефон, номера полиса, СНИЛС и паспорта</b>. На фото эти строки телефон закрашивает чёрным, и для точного распознавания уходит только закрашенная копия. После распознавания можно посмотреть, что именно ушло.</p>
       <div class="anon-demo"><div><span class="sub">В документе</span><p>Пациент: Иванова Мария Петровна<br>Дата рождения: 12.04.1987<br>Гемоглобин 128 г/л 117–160</p></div><div><span class="sub">Уходит в ИИ</span><p>Пациент: [скрыто]<br>Дата рождения: [скрыто]<br>Гемоглобин 128 г/л 117–160</p></div></div>
       <label class="check"><input type="checkbox" id="aicOk"> <span>Даю <a href="#/legal/ai" target="_blank" rel="noopener">согласие на передачу обезличенных данных в ИИ</a></span></label>
       <button type="button" class="btn" id="aicYes" disabled>Продолжить</button>
@@ -74,7 +74,7 @@ function plusTeaser(text, feature) {
 
 const PLUS_FEATURES = [
   ['ИИ сам переносит показатели', 'Снимите бланк или выберите PDF — значения, нормы, дата и клиника заполнятся сами. До 40 страниц за раз.'],
-  ['Имена не уходят с телефона', 'Перед отправкой приложение вырезает ФИО, дату рождения, адрес, номера полиса и паспорта. Фото распознаются прямо на телефоне.'],
+  ['Имена не уходят с телефона', 'Перед отправкой приложение вырезает из текста ФИО, дату рождения, адрес, номера полиса и паспорта, а на фото закрашивает эти строки.'],
   ['Расшифровка простыми словами', 'Термины из протоколов УЗИ и заключений, справка о любом показателе, вопросы к врачу.'],
   ['Копия в облаке под вашим паролем', 'Если телефон потеряется, архив восстановится на новом. Пароль знаете только вы.']
 ];
@@ -94,6 +94,9 @@ async function viewPlus() {
       <section class="card"><h2>${on ? 'Ключ' : 'У меня есть ключ'}</h2>
         <label class="f">Ключ Плюс<input class="in" id="pkey" value="${esc(on ? Plan.key : '')}" placeholder="HFP-XXXXX-XXXXX-XXXXX-XXXXX" autocomplete="off" autocapitalize="characters" spellcheck="false"></label>
         <button type="button" class="btn${on ? ' ghost' : ''}" id="pact">${on ? 'Проверить ключ' : 'Включить Плюс'}</button>
+        ${on ? `<div class="stack" style="gap:8px;margin-top:4px"><span class="sub" style="color:var(--ink);font-weight:600">Фото и сканы</span>
+          <label class="check"><input type="radio" name="pmode" value="redact" ${(localStorage.getItem('photoMode') || 'redact') === 'redact' ? 'checked' : ''}> <span><b>Точно</b> — телефон закрашивает строки с ФИО, датой рождения и номерами, в облако уходит только закрашенная копия</span></label>
+          <label class="check"><input type="radio" name="pmode" value="device" ${localStorage.getItem('photoMode') === 'device' ? 'checked' : ''}> <span><b>Только на телефоне</b> — снимок никуда не уходит, но таблицы с фото распознаются хуже</span></label></div>` : ''}
         ${on ? '<button type="button" class="btn ghost" id="poff">Отключить ИИ на этом телефоне</button><span class="sub">Ключ и согласие удалятся с телефона, в ИИ больше ничего не уходит. Архив остаётся.</span>' : ''}
       </section>
       <details class="card"><summary><b>Для владельца приложения</b></summary>
@@ -116,6 +119,7 @@ async function viewPlus() {
   const off = $('#poff');
   if (off) off.onclick = () => { if (confirm('Отключить ИИ на этом телефоне?')) { Plan.deactivate(); toast('ИИ отключён'); viewPlus(); } };
   $('#psaveurl').onclick = () => { localStorage.setItem('apiUrl', $('#purl').value.trim()); toast('Адрес сохранён'); };
+  $$('input[name=pmode]').forEach(r => r.onchange = () => { localStorage.setItem('photoMode', r.value); toast('Сохранено'); });
   const cl = $('#pcloud');
   if (cl) cl.onchange = () => localStorage.setItem('cloudOcr', cl.checked ? '1' : '0');
 }

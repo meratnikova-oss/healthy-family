@@ -1,4 +1,4 @@
-const APP_VERSION = '0.10.0';
+const APP_VERSION = '0.12.0';
 const app = document.getElementById('app');
 
 // ---------- утилиты ----------
@@ -528,9 +528,15 @@ async function viewRecord(id, tab = 'results') {
       </section>
       <div class="seg" role="tablist">${tabs.map(([k, t]) => `<button type="button" role="tab" class="${tab === k ? 'on' : ''}" data-tab="${k}">${t}</button>`).join('')}</div>
       <section class="card" id="tabbody"></section>
+      ${files.length ? '<button type="button" class="btn ghost" id="rerun">Распознать заново</button>' : ''}
       <button type="button" class="btn danger" id="del">Удалить запись</button>
     </div>
     ${nav('')}`;
+  const rr = $('#rerun');
+  if (rr) rr.onclick = () => {
+    draft = { stage: 'pick', profileId: r.profileId, files: files.map(f => new File([f.blob], f.name || 'файл', { type: f.mime })), replaceId: r.id, keepSections: r.sectionIds || [], keepNotes: r.notes || '', preSection: (r.sectionIds || [])[0] || null };
+    location.hash = '#/upload?prefilled';
+  };
 
   const body = $('#tabbody');
   if (tab === 'results') {
@@ -796,6 +802,7 @@ async function viewSettings() {
         ${persisted ? '' : '<button type="button" class="btn ghost" id="persist">Включить защиту</button><span class="sub">Если браузер не разрешает — установите приложение на главный экран и попробуйте снова.</span>'}
         <button type="button" class="btn ghost" id="export">Скачать весь архив одним файлом</button>
         <a class="btn ghost" href="#/dupes">Найти одинаковые документы</a>
+        <a class="btn ghost" href="#/rerun">Распознать заново старые записи</a>
         <label class="btn ghost" style="cursor:pointer">Восстановить из файла<input type="file" id="import" accept=".json,application/json" hidden></label>
         <span class="sub">Файл архива — дополнительная страховка к облачной копии. Он не зашифрован, поэтому храните его в надёжном месте.</span>
       </section>
@@ -887,6 +894,7 @@ const routes = [
   [/^#\/upload/, viewUpload],
   [/^#\/plus/, viewPlus],
   [/^#\/dupes$/, viewDupes],
+  [/^#\/rerun/, viewRerun],
   [/^#\/rx-list\/(\d+)$/, viewRx],
   [/^#\/rx\/new\/(\d+)$/, id => viewRxForm('new', id)],
   [/^#\/rx\/(\d+)$/, id => viewRxForm('edit', id)],

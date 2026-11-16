@@ -23,7 +23,7 @@ const Extract = (() => {
   }
 
   // Сжимаем изображение до разумного размера, чтобы уложиться в лимиты запроса и цену
-  async function imageToJpegB64(source, maxSide = 2000) {
+  async function imageToJpegB64(source, maxSide = 2000, q = 0.85) {
     let bmp;
     if (source instanceof HTMLCanvasElement) bmp = source;
     else bmp = await createImageBitmap(source);
@@ -31,7 +31,7 @@ const Extract = (() => {
     const c = document.createElement('canvas');
     c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale);
     c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
-    const url = c.toDataURL('image/jpeg', 0.85);
+    const url = c.toDataURL('image/jpeg', q);
     return url.split(',')[1];
   }
 
@@ -107,7 +107,8 @@ const Extract = (() => {
   // Единый ответ: { pageTexts[] } — текст по страницам, или { pageCount, renderPage(i) } — картинки для OCR
   async function run(file, maxPages = 40) {
     const k = kindOf(file);
-    if (k === 'image') return { pageCount: 1, renderPage: () => imageToJpegB64(file) };
+    // фото — в высоком разрешении: мелкий текст бланка на телефоне распознаётся только так
+    if (k === 'image') return { pageCount: 1, renderPage: () => imageToJpegB64(file, 3400, 0.9) };
     if (k === 'pdf') return pdf(file, maxPages);
     if (k === 'docx') return { pageTexts: [(await docx(file)).text] };
     if (k === 'sheet') return { pageTexts: [(await sheet(file)).text] };

@@ -181,16 +181,36 @@ async function readPages(files, onProgress) {
   if (skipped) notes.push(`Распознаны первые ${BATCH.maxPages} страниц, ещё ${skipped} — нет (лимит за одну загрузку). Все файлы сохранятся в архиве; остальные страницы можно загрузить отдельной записью.`);
   // Фото и сканы распознаются на телефоне — снимок с именем никуда не уходит.
   // Облачное распознавание (точнее) — только для владельца приложения и только если он сам его включил.
+  // три режима для фото и сканов:
+  //  raw    — владелец сам включил облако без закрашивания;
+  //  redact — по умолчанию: телефон распознаёт снимок, закрашивает строки с ФИО, датой рождения и номерами,
+  //           и в облако (Yandex Vision — точнее) уходит только закрашенная копия;
+  //  device — только на телефоне, в облако снимок не уходит совсем.
   const cloud = Plan.isOwner() && localStorage.getItem('cloudOcr') === '1';
-  let done = 0, failed = 0, next = 0;
-  if (jobs.length && !cloud && !LocalOCR.ready) onProgress('Готовлю распознавание на телефоне — первый раз скачивается около 11 МБ…', 0);
+  const mode = cloud ? 'raw' : (localStorage.getItem('photoMode') || 'redact');
+  const names = await anonNames();
+  const sentImages = [];
+  let done = 0, failed = 0, next = 0, fellBack = 0;
+  if (jobs.length && mode !== 'raw' && !LocalOCR.ready) onProgress('Готовлю распознавание на телефоне — первый раз скачивается около 11 МБ…', 0);
   const worker = async () => {
     while (next < jobs.length) {
       const job = jobs[next++];
       try {
         const img = await job.render();
-        job.b.text = cloud ? ((await api('ocr', { image: img })).text || '')
-          : await LocalOCR.recognize(img, m => { if (m.status === 'recognizing text') onProgress(`Распознаю страницу ${done + 1} из ${jobs.length} на телефоне — ${Math.round((m.progress || 0) * 100)}%`, (done + (m.progress || 0)) / jobs.length); });
+        const prog = m => { if (m.status === 'recognizing text') onProgress(`Страница ${done + 1} из ${jobs.length}: ${mode === 'redact' ? 'закрашиваю личные данные' : 'распознаю на телефоне'} — ${Math.round((m.progress || 0) * 100)}%`, (done + (m.progress || 0) * 0.7) / jobs.length); };
+        if (mode === 'raw') job.b.text = (await api('ocr', { image: img })).text || '';
+        else if (mode === 'device') job.b.text = await LocalOCR.recognize(img, prog);
+        else {
+          const a = await LocalOCR.analyze(img, names, prog);
+          try {
+            onProgress(`Страница ${done + 1} из ${jobs.length}: точное распознавание без личных данных`, (done + 0.8) / jobs.length);
+            job.b.text = (await api('ocr', { image: a.redacted })).text || a.text;
+            sentImages.push(a.redacted);
+          } catch (e) {
+            if ([401, 402].includes(e.status)) throw e;
+            job.b.text = a.text; fellBack++;
+          }
+        }
       } catch (e) {
         if (e.status || /Не удалось загрузить распознавание|Нет связи|адрес сервера|VPN/.test(e.message)) throw e;
         failed++; job.b.text = '';
@@ -201,7 +221,8 @@ async function readPages(files, onProgress) {
   };
   if (jobs.length) await Promise.all(Array.from({ length: cloud ? Math.min(BATCH.ocrParallel, jobs.length) : 1 }, worker));
   if (failed) notes.push(`${failed} ${plural(failed, 'страница не распозналась', 'страницы не распознались', 'страниц не распознались')} — возможно, снимок размыт. Проверьте показатели.`);
-  return { blocks, notes };
+  if (fellBack) notes.push('Точное распознавание сейчас недоступно (нет связи или включён VPN) — использован результат с телефона, он грубее. Проверьте значения по оригиналу.');
+  return { blocks, notes, sentImages };
 }
 
 // Делим текст на куски ~6000 символов по границам страниц (длинную страницу — по строкам)
@@ -288,7 +309,7 @@ function mergeParsed(list) {
 }
 
 async function recognizeFiles(files, p, onProgress) {
-  const { blocks, notes } = await readPages(files, (t, f) => onProgress(t, f * 0.6));
+  const { blocks, notes, sentImages } = await readPages(files, (t, f) => onProgress(t, f * 0.6));
   const text = blocks.map(b => b.text ? `=== Стр. ${b.n} ===\n${b.text}` : '').filter(Boolean).join('\n\n');
   if (!text.trim()) return { text: '', parsed: { docType: 'document', results: [] }, notes: notes.length ? notes : ['В файлах не нашлось текста — сохраните запись и заполните вручную.'] };
   // обезличиваем каждую страницу прямо здесь, на телефоне; в ИИ уходит только этот вариант
@@ -297,7 +318,7 @@ async function recognizeFiles(files, p, onProgress) {
   const sentText = safe.map(b => b.text ? `=== Стр. ${b.n} ===\n${b.text}` : '').filter(Boolean).join('\n\n');
   const chunks = chunkBlocks(safe);
   const r = await parseChunks(chunks, p, (t, f) => onProgress(t, 0.6 + f * 0.4));
-  return { text, sentText, parsed: r.parsed, notes: [...notes, ...r.notes] };
+  return { text, sentText, sentImages, parsed: r.parsed, notes: [...notes, ...r.notes] };
 }
 
 // ---------- запуск ----------
@@ -310,7 +331,7 @@ async function startRecognition() {
   try {
     const p = await db.profiles.get(draft.profileId);
     const r = await recognizeFiles(draft.files, p, setProgress);
-    draft.text = r.text; draft.sentText = r.sentText; draft.parsed = r.parsed; draft.notes = r.notes; draft.stage = 'review'; draft.rows = undefined;
+    draft.text = r.text; draft.sentText = r.sentText; draft.sentImages = r.sentImages; draft.parsed = r.parsed; draft.notes = r.notes; draft.stage = 'review'; draft.rows = undefined;
     viewReview();
   } catch (e) {
     draft.busy = false;
@@ -355,14 +376,14 @@ async function viewReview() {
       $('#cancel').onclick = stopQueue;
       return;
     }
-    if (d._loaded !== d.qi) { Object.assign(d, { files: it.files, text: it.text, sentText: it.sentText, parsed: it.parsed, notes: it.notes, rows: undefined, _loaded: d.qi }); }
+    if (d._loaded !== d.qi) { Object.assign(d, { files: it.files, text: it.text, sentText: it.sentText, sentImages: it.sentImages, parsed: it.parsed, notes: it.notes, rows: undefined, _loaded: d.qi }); }
   }
   const pz = d.parsed || {};
   const p = await db.profiles.get(d.profileId);
   const sections = (await db.sections.where('profileId').equals(p.id).toArray()).sort((a, b) => a.order - b.order);
   const clinics = await db.clinics.toArray(), doctors = await db.doctors.toArray();
   const hints = (pz.sectionHints || []).map(h => String(h).toLowerCase());
-  const pre = new Set(sections.filter(s => s.id === d.preSection || hints.includes(s.name.toLowerCase())).map(s => s.id));
+  const pre = new Set(d.keepSections?.length ? d.keepSections : sections.filter(s => s.id === d.preSection || hints.includes(s.name.toLowerCase())).map(s => s.id));
   if (!pre.size) {
     const m = (pz.results || []).map(r => Metrics.match(r.name)).find(Boolean);
     const s = m && sections.find(s => s.name === m.section) || sections.find(s => /анализ/i.test(s.name));
@@ -379,7 +400,7 @@ async function viewReview() {
       <div class="tray-row">${d.files.map((f, i) => { if (isImageFile(f) && !f._u) f._u = URL.createObjectURL(f); return `<button type="button" class="tthumb" data-open="${i}" aria-label="Открыть страницу ${i + 1}">${isImageFile(f) ? `<img src="${f._u}" alt="">` : `<span class="text">${esc(fileExt(f))}</span>`}<span class="tnum">${i + 1}</span></button>`; }).join('')}</div>
       <section class="card">
         <span class="sub">${esc(p.name)} · ${pages} ${plural(pages, 'страница', 'страницы', 'страниц')}</span>
-        ${d.sentText ? `<details class="sent"><summary>Что получил ИИ — без имён и номеров</summary><pre>${esc(d.sentText.slice(0, 6000))}${d.sentText.length > 6000 ? '\n…' : ''}</pre></details>` : ''}
+        ${d.sentText ? `<details class="sent"><summary>Что получил ИИ — без имён и номеров</summary>${(d.sentImages || []).length ? `<div class="tray-row" style="min-height:0;margin-top:8px">${d.sentImages.map((b, i) => `<button type="button" class="tthumb" data-sentimg="${i}"><img src="data:image/jpeg;base64,${b}" alt=""><span class="tnum">${i + 1}</span></button>`).join('')}</div><span class="sub">Копии снимков для точного распознавания: строки с личными данными закрашены на телефоне.</span>` : ''}<pre>${esc(d.sentText.slice(0, 6000))}${d.sentText.length > 6000 ? '\n…' : ''}</pre></details>` : ''}
         <label class="f ${unsure.has('title') ? 'warn' : ''}">Название<input class="in" name="title" value="${esc(pz.title || '')}" placeholder="Например, Общий анализ крови"></label>
         <label class="f">Тип<select class="in" name="type">${Object.entries(RECORD_TYPES).map(([k, v]) => `<option value="${k}" ${k === (pz.docType || 'document') ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
         <label class="f ${unsure.has('date') ? 'warn' : ''}">Дата ${unsure.has('date') ? '— проверьте, распознано неуверенно' : ''}<input class="in" type="date" name="date" value="${esc(pz.date || '')}"></label>
@@ -403,6 +424,7 @@ async function viewReview() {
   drawRows(p);
   bindVisitEditor($('#rev select[name=type]'));
   $$('label.pill input[name=sec]').forEach(i => i.onchange = () => i.parentElement.classList.toggle('on', i.checked));
+  $$('[data-sentimg]').forEach(b => b.onclick = () => { const w = document.createElement('div'); w.className = 'sheet'; w.innerHTML = `<div class="card sheet-card" style="padding:8px"><img src="data:image/jpeg;base64,${d.sentImages[+b.dataset.sentimg]}" style="width:100%;border-radius:10px"><button type="button" class="btn ghost">Закрыть</button></div>`; document.body.appendChild(w); w.querySelector('button').onclick = () => w.remove(); w.onclick = e => { if (e.target === w) w.remove(); }; });
   $$('[data-open]').forEach(b => b.onclick = () => { const f = d.files[+b.dataset.open]; const u = URL.createObjectURL(f); window.open(u, '_blank'); setTimeout(() => URL.revokeObjectURL(u), 60000); });
   $('#addrow').onclick = () => { syncRows(); d.rows.push({ name: '', value: '', unit: '', refLow: '', refHigh: '' }); drawRows(p); };
   $('#cancel').onclick = q ? stopQueue : () => { if (confirm('Отменить загрузку? Снимки останутся в лотке, их можно распознать позже.')) { draft = null; location.hash = '#/'; render(); } };
@@ -435,7 +457,7 @@ async function saveDraft(fd) {
   const date = fd.get('date') || null;
   // тот же файл уже есть в архиве?
   const twin = d.files.length ? await findSameFile(d.files).catch(() => null) : null;
-  if (twin && !confirm(`Такой документ уже есть: «${twin.title || RECORD_TYPES[twin.type] || 'Документ'}» от ${fmtDate(twin.date)}. Всё равно сохранить ещё раз?`)) {
+  if (twin && twin.id !== d.replaceId && !confirm(`Такой документ уже есть: «${twin.title || RECORD_TYPES[twin.type] || 'Документ'}» от ${fmtDate(twin.date)}. Всё равно сохранить ещё раз?`)) {
     if (d.queue) { nextInQueue(); return; }
     draft = null; trayClear(); location.hash = '#/record/' + twin.id; return;
   }
@@ -447,7 +469,7 @@ async function saveDraft(fd) {
   await db.transaction('rw', db.records, db.files, db.results, async () => {
     recordId = await db.records.add({
       profileId: p.id, date, type: fd.get('type'), title: fd.get('title').trim(), clinicId, doctorId, sectionIds,
-      conclusion: (fd.get('conclusion') || '').trim(), text: d.text || '', notes: '', explanation: null, createdAt: new Date().toISOString()
+      conclusion: (fd.get('conclusion') || '').trim(), text: d.text || '', notes: d.keepNotes || '', explanation: null, createdAt: new Date().toISOString()
     });
     for (const f of d.files) await db.files.add({ recordId, name: f.name, mime: f.type, size: f.size, blob: f, hash: f._hash || null });
     const rows = d.rows.filter(r => String(r.name).trim() && String(r.value).trim());
@@ -466,8 +488,9 @@ async function saveDraft(fd) {
   }
   if (d.queue) { d.saved = (d.saved || 0) + 1; toast('Сохранено'); nextInQueue(); return; }
   if (d.fromInbox) await MailInbox.ack(d.fromInbox).catch(() => {});
+  if (d.replaceId) await deleteRecord(d.replaceId);
   draft = null; trayClear();
-  toast('Сохранено в архив');
+  toast(d.replaceId ? 'Запись распознана заново' : 'Сохранено в архив');
   location.hash = sectionIds[0] ? '#/section/' + sectionIds[0] : '#/';
 }
 
