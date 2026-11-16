@@ -30,6 +30,8 @@ async function trayLoad() {
 const trayClear = () => db.kv.delete('uploadTray').catch(() => {});
 
 const CAM_ICON = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>';
+const GAL_ICON = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="M4 18l5-5 4 4 3-3 4 4"/></svg>';
+const FILE_ICON = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 13h6M9 17h6"/></svg>';
 const isImageFile = f => Extract.kindOf(f) === 'image';
 const fileExt = f => (f.name.split('.').pop() || 'файл').slice(0, 4).toUpperCase();
 const pagesOf = f => f._pages || 1;
@@ -61,12 +63,14 @@ async function viewUpload() {
       ${draft.fromInbox ? '<span class="sub">Файлы из письма — выберите, чья это запись, и нажмите «Распознать».</span>' : ''}
       <section class="card" style="gap:10px">
         <div class="tray-row" id="tray"></div>
-        <div class="row" style="gap:8px">
-          <button type="button" class="btn" id="shoot" style="flex:1;padding:0 10px;white-space:nowrap;gap:6px">${CAM_ICON} <span id="shootlbl">Снять фото</span></button>
-          <button type="button" class="btn ghost" id="pickbtn" style="flex:1;padding:0 10px;white-space:nowrap">Выбрать файлы</button>
+        <div class="srcrow">
+          <button type="button" class="btn" id="shoot">${CAM_ICON}<span id="shootlbl">Снять</span></button>
+          <button type="button" class="btn ghost" id="galbtn">${GAL_ICON}<span>Галерея</span></button>
+          <button type="button" class="btn ghost" id="pickbtn">${FILE_ICON}<span>Файлы</span></button>
         </div>
         <input type="file" id="cam" accept="image/*" capture="environment" hidden>
-        <input type="file" id="pick" multiple accept="image/*,.pdf,.docx,.doc,.xlsx,.xls,.csv,.txt" hidden>
+        <input type="file" id="gal" accept="image/*" multiple hidden>
+        <input type="file" id="pick" multiple accept="application/pdf,image/*,.pdf,.docx,.doc,.xlsx,.xls,.csv,.txt" hidden>
         <span class="sub" id="limitline">Фото, PDF, Word, Excel. Снимайте страницы по порядку — до ${BATCH.maxPages} страниц за раз.</span>
       </section>
       <section class="card" id="modebox" hidden style="gap:8px">
@@ -86,6 +90,8 @@ async function viewUpload() {
   const tc = $('#trayclear'); if (tc) tc.onclick = () => { draft.files = []; trayClear(); tc.closest('.card').remove(); drawTray(); };
   $('#shoot').onclick = () => $('#cam').click();
   $('#pickbtn').onclick = () => $('#pick').click();
+  $('#galbtn').onclick = () => $('#gal').click();
+  $('#gal').onchange = e => { const fs = [...e.target.files]; e.target.value = ''; add(fs); };
   const add = list => {
     const room = BATCH.maxFiles - draft.files.length;
     const arr = [...list];
@@ -128,7 +134,7 @@ function drawTray() {
   const n = files.length, pages = totalPages(files);
   if (!draft.modeChosen || n < 2) draft.mode = defaultMode(files);
   const many = draft.mode === 'many' && n > 1;
-  $('#shootlbl').textContent = n ? 'Ещё фото' : 'Снять фото';
+  $('#shootlbl').textContent = n ? 'Ещё' : 'Снять';
   $('#modebox').hidden = n < 2;
   $$('[data-mode]').forEach(b => b.classList.toggle('on', b.dataset.mode === draft.mode));
   $('#modehint').textContent = many
@@ -142,6 +148,11 @@ function drawTray() {
     : `${pages} ${plural(pages, 'страница', 'страницы', 'страниц')} из ${BATCH.maxPages} возможных за раз.`;
   const btn = $('#recognize');
   btn.disabled = $('#justsave').disabled = !n;
+  const plus = Plan.isPlus();
+  btn.className = plus ? 'btn' : 'btn ghost';
+  $('#justsave').className = plus ? 'btn ghost' : 'btn';
+  $('#justsave').textContent = !plus && many ? `Сохранить ${n} ${plural(n, 'документ', 'документа', 'документов')}` : plus ? 'Сохранить без распознавания' : 'Сохранить в архив';
+  if (!plus) { btn.innerHTML = '<span class="plus-badge">Плюс</span> Распознать показатели с ИИ'; return; }
   btn.textContent = !n ? 'Распознать' : many ? `Распознать ${n} ${plural(n, 'документ', 'документа', 'документов')}` : `Распознать: ${Math.min(pages, BATCH.maxPages)} ${plural(Math.min(pages, BATCH.maxPages), 'страница', 'страницы', 'страниц')}`;
 }
 
@@ -168,23 +179,27 @@ async function readPages(files, onProgress) {
     else for (let j = 0; j < out.pageCount; j++) { const b = { n: ++pageNo, text: null }; blocks.push(b); jobs.push({ b, render: () => out.renderPage(j) }); budget--; }
   }
   if (skipped) notes.push(`Распознаны первые ${BATCH.maxPages} страниц, ещё ${skipped} — нет (лимит за одну загрузку). Все файлы сохранятся в архиве; остальные страницы можно загрузить отдельной записью.`);
-  // OCR: по 3 страницы одновременно
+  // Фото и сканы распознаются на телефоне — снимок с именем никуда не уходит.
+  // Облачное распознавание (точнее) — только для владельца приложения и только если он сам его включил.
+  const cloud = Plan.isOwner() && localStorage.getItem('cloudOcr') === '1';
   let done = 0, failed = 0, next = 0;
+  if (jobs.length && !cloud && !LocalOCR.ready) onProgress('Готовлю распознавание на телефоне — первый раз скачивается около 11 МБ…', 0);
   const worker = async () => {
     while (next < jobs.length) {
       const job = jobs[next++];
       try {
         const img = await job.render();
-        job.b.text = (await api('ocr', { image: img })).text || '';
+        job.b.text = cloud ? ((await api('ocr', { image: img })).text || '')
+          : await LocalOCR.recognize(img, m => { if (m.status === 'recognizing text') onProgress(`Распознаю страницу ${done + 1} из ${jobs.length} на телефоне — ${Math.round((m.progress || 0) * 100)}%`, (done + (m.progress || 0)) / jobs.length); });
       } catch (e) {
-        if (/Код доступа|Лимит|Нет связи|адрес сервера/.test(e.message)) throw e;
+        if (e.status || /Не удалось загрузить распознавание|Нет связи|адрес сервера/.test(e.message)) throw e;
         failed++; job.b.text = '';
       }
       done++;
       onProgress(`Распознаю страницы: ${done} из ${jobs.length}`, done / Math.max(1, jobs.length));
     }
   };
-  if (jobs.length) await Promise.all(Array.from({ length: Math.min(BATCH.ocrParallel, jobs.length) }, worker));
+  if (jobs.length) await Promise.all(Array.from({ length: cloud ? Math.min(BATCH.ocrParallel, jobs.length) : 1 }, worker));
   if (failed) notes.push(`${failed} ${plural(failed, 'страница не распозналась', 'страницы не распознались', 'страниц не распознались')} — возможно, снимок размыт. Проверьте показатели.`);
   return { blocks, notes };
 }
@@ -218,7 +233,7 @@ async function parseChunks(chunks, p, onProgress) {
   const one = async (text, part, of) => {
     try { return await api('parse', { text, part, parts: of, profileKind: p.kind, sections }); }
     catch (e) {
-      if (/Код доступа|Лимит|Нет связи|адрес сервера/.test(e.message)) throw e;
+      if ([401, 402, 429].includes(e.status) || /Нет связи|адрес сервера/.test(e.message)) throw e;
       // не уложилось — делим пополам и пробуем ещё раз
       if (text.length > 1500) {
         const half = Math.floor(text.length / 2), nl = text.lastIndexOf('\n', half), mid = nl > 200 ? nl : half;
@@ -266,21 +281,26 @@ async function recognizeFiles(files, p, onProgress) {
   const { blocks, notes } = await readPages(files, (t, f) => onProgress(t, f * 0.6));
   const text = blocks.map(b => b.text ? `=== Стр. ${b.n} ===\n${b.text}` : '').filter(Boolean).join('\n\n');
   if (!text.trim()) return { text: '', parsed: { docType: 'document', results: [] }, notes: notes.length ? notes : ['В файлах не нашлось текста — сохраните запись и заполните вручную.'] };
-  const chunks = chunkBlocks(blocks);
+  // обезличиваем каждую страницу прямо здесь, на телефоне; в ИИ уходит только этот вариант
+  const names = await anonNames();
+  const safe = blocks.map(b => ({ n: b.n, text: b.text ? Anon.scrub(b.text, { names }).text : b.text }));
+  const sentText = safe.map(b => b.text ? `=== Стр. ${b.n} ===\n${b.text}` : '').filter(Boolean).join('\n\n');
+  const chunks = chunkBlocks(safe);
   const r = await parseChunks(chunks, p, (t, f) => onProgress(t, 0.6 + f * 0.4));
-  return { text, parsed: r.parsed, notes: [...notes, ...r.notes] };
+  return { text, sentText, parsed: r.parsed, notes: [...notes, ...r.notes] };
 }
 
 // ---------- запуск ----------
 async function startRecognition() {
+  if (!(await Plan.gate('Распознавание показателей'))) return;
   if (draft.mode === 'many' && draft.files.length > 1) return startQueue(true);
-  const btns = [$('#recognize'), $('#justsave'), $('#shoot'), $('#pickbtn')];
+  const btns = [$('#recognize'), $('#justsave'), $('#shoot'), $('#galbtn'), $('#pickbtn')];
   btns.forEach(b => b.disabled = true);
   draft.busy = true;
   try {
     const p = await db.profiles.get(draft.profileId);
     const r = await recognizeFiles(draft.files, p, setProgress);
-    draft.text = r.text; draft.parsed = r.parsed; draft.notes = r.notes; draft.stage = 'review'; draft.rows = undefined;
+    draft.text = r.text; draft.sentText = r.sentText; draft.parsed = r.parsed; draft.notes = r.notes; draft.stage = 'review'; draft.rows = undefined;
     viewReview();
   } catch (e) {
     draft.busy = false;
@@ -325,7 +345,7 @@ async function viewReview() {
       $('#cancel').onclick = stopQueue;
       return;
     }
-    if (d._loaded !== d.qi) { Object.assign(d, { files: it.files, text: it.text, parsed: it.parsed, notes: it.notes, rows: undefined, _loaded: d.qi }); }
+    if (d._loaded !== d.qi) { Object.assign(d, { files: it.files, text: it.text, sentText: it.sentText, parsed: it.parsed, notes: it.notes, rows: undefined, _loaded: d.qi }); }
   }
   const pz = d.parsed || {};
   const p = await db.profiles.get(d.profileId);
@@ -349,7 +369,7 @@ async function viewReview() {
       <div class="tray-row">${d.files.map((f, i) => { if (isImageFile(f) && !f._u) f._u = URL.createObjectURL(f); return `<button type="button" class="tthumb" data-open="${i}" aria-label="Открыть страницу ${i + 1}">${isImageFile(f) ? `<img src="${f._u}" alt="">` : `<span class="text">${esc(fileExt(f))}</span>`}<span class="tnum">${i + 1}</span></button>`; }).join('')}</div>
       <section class="card">
         <span class="sub">${esc(p.name)} · ${pages} ${plural(pages, 'страница', 'страницы', 'страниц')}</span>
-        ${pz.patientName ? `<span class="sub">Пациент в документе: <b>${esc(pz.patientName)}</b>. Если это не ${esc(p.name)}, отмените и выберите другой профиль.</span>` : ''}
+        ${d.sentText ? `<details class="sent"><summary>Что получил ИИ — без имён и номеров</summary><pre>${esc(d.sentText.slice(0, 6000))}${d.sentText.length > 6000 ? '\n…' : ''}</pre></details>` : ''}
         <label class="f ${unsure.has('title') ? 'warn' : ''}">Название<input class="in" name="title" value="${esc(pz.title || '')}" placeholder="Например, Общий анализ крови"></label>
         <label class="f">Тип<select class="in" name="type">${Object.entries(RECORD_TYPES).map(([k, v]) => `<option value="${k}" ${k === (pz.docType || 'document') ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
         <label class="f ${unsure.has('date') ? 'warn' : ''}">Дата ${unsure.has('date') ? '— проверьте, распознано неуверенно' : ''}<input class="in" type="date" name="date" value="${esc(pz.date || '')}"></label>

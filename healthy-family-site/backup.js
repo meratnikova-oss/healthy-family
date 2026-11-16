@@ -131,7 +131,7 @@ function bindBackupCard(redraw) {
     const a = $('#bkp1').value, b = $('#bkp2').value;
     if (a.length < 8) { toast('Пароль — не короче 8 символов'); return; }
     if (a !== b) { toast('Пароли не совпадают'); return; }
-    if (!settings.apiUrl) { toast('Сначала укажите адрес сервера и код доступа'); return; }
+    if (!settings.apiUrl) { toast('Сначала включите Плюс: «Ещё» → «Healthy Family Плюс»'); return; }
     on.disabled = true; on.textContent = 'Шифрую и сохраняю…';
     await Backup.enable(a);
     await Backup.run();
@@ -156,19 +156,19 @@ async function viewBackupRestore() {
   app.innerHTML = `<div class="top">${backLink(back)}<h1 class="grow">Восстановить из облака</h1></div>
     <div class="pad stack">
       ${!settings.apiUrl || !settings.apiToken ? `<section class="card"><h2>Подключение</h2>
-        <label class="f">Адрес сервера<input class="in" id="rurl" value="${esc(settings.apiUrl)}" inputmode="url"></label>
-        <label class="f">Код доступа<input class="in" id="rtok" value="${esc(settings.apiToken)}" autocomplete="off"></label>
+        ${HF_CONFIG.apiUrl ? '' : `<label class="f">Адрес сервера<input class="in" id="rurl" value="${esc(settings.apiUrl)}" inputmode="url"></label>`}
+        <label class="f">Ключ Плюс<input class="in" id="rtok" value="${esc(settings.apiToken)}" autocomplete="off"></label>
         <button type="button" class="btn" id="rsave">Подключиться</button></section>` : ''}
       <div id="rlist"></div>
       <p class="sub" style="margin:0">Восстановление заменит данные на этом телефоне данными из копии.</p>
     </div>`;
   const rs = $('#rsave');
-  if (rs) { rs.onclick = () => { localStorage.setItem('apiUrl', $('#rurl').value.trim()); localStorage.setItem('apiToken', $('#rtok').value.trim()); viewBackupRestore(); }; return; }
+  if (rs) { rs.onclick = () => { if ($('#rurl')) localStorage.setItem('apiUrl', $('#rurl').value.trim()); localStorage.setItem('apiToken', $('#rtok').value.trim()); viewBackupRestore(); }; return; }
   const box = $('#rlist');
   box.innerHTML = '<p class="progress">Ищу копии…</p>';
   let items;
   try { items = await Backup.list(); } catch (e) { box.innerHTML = `<div class="card"><p class="empty" style="margin:0">${esc(e.message)}</p></div>`; return; }
-  if (!items.length) { box.innerHTML = '<div class="card"><p class="empty" style="margin:0">В облаке пока нет копий для этого кода доступа.</p></div>'; return; }
+  if (!items.length) { box.innerHTML = '<div class="card"><p class="empty" style="margin:0">В облаке пока нет копий для этого ключа.</p></div>'; return; }
   box.innerHTML = `<section class="card"><h2>Копии</h2>${items.map((it, i) => `<div class="row" style="min-height:48px"><div class="grow"><div style="font-weight:500">${fmtStamp(it.at)}${i === 0 ? ' · последняя' : ''}</div><div class="sub">${fmtSize(it.size)}</div></div><button type="button" class="pill" data-rid="${esc(it.id)}">Восстановить</button></div>`).join('')}</section>`;
   $$('[data-rid]').forEach(b => b.onclick = () => {
     const ov = document.createElement('div');

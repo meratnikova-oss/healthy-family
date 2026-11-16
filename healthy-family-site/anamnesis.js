@@ -103,7 +103,7 @@ function attachAutocomplete(input, { source, onPick, onFree }) {
     box.innerHTML = items.map((x, i) => `<button type="button" class="ac-item" role="option" data-i="${i}">
         ${x.code ? `<span class="ac-code">${esc(x.code)}</span>` : ''}<span>${esc(x.name)}${x.hint ? `<span class="ac-hint"> · «${esc(x.hint)}»</span>` : ''}</span></button>`).join('')
       + `<div class="ac-foot">
-          ${source === 'icd' ? '<button type="button" class="linkbtn" data-ai>Подобрать по описанию с ИИ</button>' : ''}
+          ${source === 'icd' && Plan.isPlus() ? '<button type="button" class="linkbtn" data-ai>Подобрать по описанию с ИИ</button>' : ''}
           <button type="button" class="linkbtn" data-free>Записать как есть: «${esc(q.trim())}»</button></div>`;
     box.hidden = false; input.setAttribute('aria-expanded', 'true');
     $$('.ac-item', box).forEach(b => b.onmousedown = e => { e.preventDefault(); pick(items[+b.dataset.i]); });
@@ -111,9 +111,10 @@ function attachAutocomplete(input, { source, onPick, onFree }) {
     const ai = $('[data-ai]', box); if (ai) ai.onmousedown = e => { e.preventDefault(); aiSuggest(); };
   }
   async function aiSuggest() {
+    if (!(await Plan.gate('Подбор кода МКБ'))) return;
     box.innerHTML = '<div class="ac-note">Подбираю коды МКБ-10…</div>';
     try {
-      const r = await api('icd_suggest', { text: input.value.trim() });
+      const r = await api('icd_suggest', { text: await anonText(input.value.trim()) });
       await ICD.load();
       items = (r.codes || []).map(c => ICD.get(String(c).toUpperCase())).filter(Boolean);
       box.innerHTML = (items.length ? items.map((x, i) => `<button type="button" class="ac-item" data-i="${i}"><span class="ac-code">${esc(x.code)}</span><span>${esc(x.name)}</span></button>`).join('')

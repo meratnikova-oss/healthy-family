@@ -1,7 +1,7 @@
 // Офлайн-оболочка приложения. VERSION меняйте при каждом выпуске — так очищается старый кэш.
-const VERSION = 'v0.8.0';
+const VERSION = 'v0.9.0';
 const SHARE_CACHE = 'share-inbox'; // файлы, пришедшие через «Поделиться»
-const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'db.js', 'metrics.js', 'extract.js', 'anamnesis.js', 'mailbox.js', 'iddocs.js', 'care.js', 'health.js', 'backup.js', 'upload.js', 'icd10.json', 'icd10-aliases.json',
+const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'db.js', 'metrics.js', 'extract.js', 'anamnesis.js', 'mailbox.js', 'iddocs.js', 'care.js', 'health.js', 'backup.js', 'upload.js', 'config.js', 'anon.js', 'ocr.js', 'plan.js', 'legal.js', 'info.js', 'icd10.json', 'icd10-aliases.json',
   'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png',
   'dexie.min.js', 'pdf.min.js', 'pdf.worker.min.js', 'mammoth.browser.min.js', 'xlsx.full.min.js',
   'onest-cyrillic-400-normal.woff2', 'onest-cyrillic-500-normal.woff2', 'onest-cyrillic-600-normal.woff2', 'onest-cyrillic-700-normal.woff2'];
@@ -33,7 +33,7 @@ async function handleShare(request) {
 
 // Сначала сеть: при интернете всегда свежая версия. Сохранённая копия — только без сети.
 // Крупные библиотеки и шрифты не меняются между версиями — их берём из кэша, чтобы не тратить трафик.
-const STATIC = /\.(woff2|png|svg)$|(dexie|pdf|pdf\.worker|mammoth\.browser|xlsx\.full)\.min\.js$/;
+const STATIC = /\.(woff2|png|svg|traineddata\.gz)$|(dexie|pdf|pdf\.worker|mammoth\.browser|xlsx\.full|tesseract|worker)\.min\.js$|tesseract-core.*\.wasm\.js$/;
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
   if (e.request.method === 'POST' && url.origin === location.origin && url.pathname.endsWith('/share-target')) {

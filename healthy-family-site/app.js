@@ -1,4 +1,4 @@
-const APP_VERSION = '0.8.0';
+const APP_VERSION = '0.9.0';
 const app = document.getElementById('app');
 
 // ---------- утилиты ----------
@@ -17,7 +17,7 @@ function toast(msg) {
 }
 
 const settings = {
-  get apiUrl() { return localStorage.getItem('apiUrl') || ''; },
+  get apiUrl() { return localStorage.getItem('apiUrl') || (typeof HF_CONFIG !== 'undefined' && HF_CONFIG.apiUrl) || ''; },
   get apiToken() { return localStorage.getItem('apiToken') || ''; },
   get profileId() { return +localStorage.getItem('profileId') || null; },
   set profileId(v) { localStorage.setItem('profileId', v); },
@@ -26,7 +26,7 @@ const settings = {
 };
 
 async function api(action, payload) {
-  if (!settings.apiUrl) throw new Error('Не указан адрес сервера распознавания. Откройте «Настройки».');
+  if (!settings.apiUrl) throw new Error('Не указан адрес сервера. Откройте «Ещё» → «Healthy Family Плюс».');
   let r;
   try { r = await fetch(settings.apiUrl.trim(), {
     method: 'POST',
@@ -36,10 +36,12 @@ async function api(action, payload) {
     throw new Error('Нет связи с сервером распознавания. Проверьте интернет, адрес сервера и переменную ALLOWED_ORIGIN у функции.');
   }
   const data = await r.json().catch(() => ({}));
-  if (r.status === 401) throw new Error('Код доступа не принят. Проверьте его в «Настройках».');
-  if (r.status === 429) throw new Error(data.error || 'Лимит распознаваний на этот месяц исчерпан.');
-  if (r.status === 403) throw new Error('Облако ответило 403: проверьте, что у функции включено «Public function».');
-  if (!r.ok) throw new Error(data.error || 'Сервер распознавания ответил ошибкой ' + r.status);
+  const fail = msg => Object.assign(new Error(msg), { status: r.status, until: data.until });
+  if (r.status === 401) throw fail('Ключ не принят. Проверьте его: «Ещё» → «Healthy Family Плюс».');
+  if (r.status === 402) throw fail(data.error || 'Срок ключа Плюс закончился. Продлите его: «Ещё» → «Healthy Family Плюс».');
+  if (r.status === 429) throw fail(data.error || 'Лимит распознаваний на этот месяц исчерпан.');
+  if (r.status === 403) throw fail(data.error || 'Облако ответило 403: проверьте, что у функции включено «Public function».');
+  if (!r.ok) throw fail(data.error || 'Сервер распознавания ответил ошибкой ' + r.status);
   return data;
 }
 
@@ -289,7 +291,7 @@ async function viewHome() {
     $('.pad.stack').insertAdjacentHTML('afterbegin', html);
     const n = $('#bknag'); if (n) n.onclick = () => { localStorage.setItem('bkNag', new Date().toISOString().slice(0, 7)); n.closest('section').remove(); };
   });
-  MailInbox.count().then(n => {
+  if (Plan.isOwner()) MailInbox.count().then(n => {
     if (!n || !$('.pad.stack')) return;
     const a = document.createElement('a');
     a.href = '#/inbox'; a.className = 'card'; a.style.cssText = 'text-decoration:none;color:inherit;background:var(--accent-soft)';
@@ -553,14 +555,16 @@ async function viewRecord(id, tab = 'results') {
         <span class="sub">Расшифровка объясняет термины и не заменяет заключение врача.</span>`;
     } else {
       body.innerHTML = `<p class="empty">Расшифровка объяснит термины из протокола простыми словами и подскажет, что уточнить у врача.</p>
-        <button type="button" class="btn" id="doexplain" ${r.text ? '' : 'disabled'}>Расшифровать</button>
+        ${Plan.isPlus() ? '' : plusTeaser('Расшифровка терминов — в Плюс', 'Расшифровка терминов')}
+        <button type="button" class="btn" id="doexplain" ${r.text && Plan.isPlus() ? '' : 'disabled'}>Расшифровать</button>
         ${r.text ? '' : '<span class="sub">Нужен распознанный текст документа.</span>'}`;
       const b = $('#doexplain');
       if (b) b.onclick = async () => {
+        if (!(await Plan.gate('Расшифровка терминов'))) return;
         b.disabled = true; b.textContent = 'Расшифровываю…';
         try {
           const p = await db.profiles.get(r.profileId);
-          const data = await api('explain', { text: r.text, conclusion: r.conclusion, profileKind: p?.kind });
+          const data = await api('explain', { text: await anonText(r.text), conclusion: await anonText(r.conclusion || ''), profileKind: p?.kind });
           await db.records.update(r.id, { explanation: data });
           viewRecord(id, 'explain');
         } catch (e) { toast(e.message); b.disabled = false; b.textContent = 'Расшифровать'; }
@@ -684,6 +688,7 @@ async function renderMetricInfo(metricId, name, unit, kind, force = false) {
   const audience = kind === 'pet' ? 'pet' : kind === 'child' ? 'child' : 'adult';
   const key = `info:${audience}:${metricId}`;
   let cached = force ? null : await db.kv.get(key);
+  if (!cached && !Plan.isPlus()) { box.innerHTML = `<h2>Что это за показатель</h2>${plusTeaser('Справка о показателе простыми словами — в Плюс', 'Справка о показателе')}`; return; }
   if (!cached) {
     box.innerHTML = `<h2>Что это за показатель</h2><p class="empty">Загружаю справку…</p>`;
     try {
@@ -776,18 +781,14 @@ async function viewSettings() {
   app.innerHTML = `
     <div class="top"><h1 class="grow">Настройки</h1></div>
     <div class="pad stack">
-      <section class="card"><h2>Распознавание</h2>
-        <label class="f">Адрес сервера<input class="in" id="url" value="${esc(settings.apiUrl)}" placeholder="https://functions.yandexcloud.net/…" inputmode="url"></label>
-        <label class="f">Код доступа<input class="in" id="tok" value="${esc(settings.apiToken)}" autocomplete="off"></label>
-        <div class="row"><button type="button" class="btn" id="save" style="flex:1">Сохранить</button><button type="button" class="btn ghost" id="ping" style="flex:1">Проверить</button></div>
-      </section>
-      <section class="card"><h2>Почта</h2>
+      <a class="card plus-card" href="#/plus"><div class="between"><h2>Healthy Family Плюс</h2><span class="plus-badge">${Plan.isPlus() ? 'включён' : 'ИИ'}</span></div>
+        <span class="sub">${Plan.isPlus() ? esc(Plan.untilText || 'Ключ принят') + ' · ИИ видит только обезличенный текст' : 'ИИ сам переносит показатели из бланков. Имена и номера документов не покидают телефон.'}</span></a>
+      ${Plan.isOwner() ? `<section class="card"><h2>Почта</h2>
         <p class="sub" style="margin:0">Почтовый агент сам забирает письма с анализами и шифрует их ключом этого телефона. Прочитать их может только этот телефон.</p>
         <div id="mailkey"></div>
         <a class="btn ghost" href="#/inbox">Входящие из почты</a>
-        <span class="sub">Без агента: в почтовом приложении откройте вложение → «Поделиться» → «Healthy Family».</span>
-      </section>
-      ${await backupCard()}
+      </section>` : ''}
+      ${Plan.isPlus() ? await backupCard() : `<section class="card"><h2>Резервная копия в облаке</h2><p class="sub" style="margin:0">Сейчас данные есть только в этом телефоне. Скачивайте архив файлом ниже или включите зашифрованную копию в облаке.</p>${plusTeaser('Автоматическая копия в облаке — в Плюс', 'Копия в облаке')}</section>`}
       <section class="card"><h2>Данные на телефоне</h2>
         <div class="between"><span>Занято</span><span class="sub">${usage || '—'}</span></div>
         <div class="between"><span>Защита от автоочистки</span><span class="tag ${persisted ? 'normal' : 'high'}">${persisted ? 'Включена' : 'Не включена'}</span></div>
@@ -800,7 +801,14 @@ async function viewSettings() {
         ${profiles.map(x => `<a class="between" href="#/profile/${x.id}" style="text-decoration:none;color:inherit;min-height:40px;align-items:center"><span>${esc(x.name)}</span><span class="sub">${x.kind === 'pet' ? 'питомец' : x.kind === 'child' ? 'ребёнок' : 'взрослый'} · анамнез ›</span></a>`).join('')}
         <a class="btn ghost" href="#/profile/new">Добавить профиль</a>
       </section>
+      <section class="card stack" style="gap:10px"><h2>Помощь</h2>
+        <a class="between doclink" href="#/faq"><span>Вопросы и ответы</span><span>›</span></a>
+        <a class="between doclink" href="#/tour"><span>Обучение</span><span>›</span></a>
+        <a class="between doclink" href="#/legal/offer"><span>Пользовательское соглашение</span><span>›</span></a>
+        <a class="between doclink" href="#/legal/privacy"><span>Политика конфиденциальности</span><span>›</span></a>
+      </section>
       <button type="button" class="btn ghost" id="checkupd">Проверить обновления</button>
+      <button type="button" class="btn danger" id="wipe">Удалить все данные на телефоне</button>
       <p class="sub" style="text-align:center">Версия ${APP_VERSION} · схема базы ${db.verno}</p>
     </div>
     ${nav('settings')}`;
@@ -817,11 +825,12 @@ async function viewSettings() {
       <button type="button" class="btn ghost" id="mkcopy" style="width:100%">Скопировать ключ</button>`;
     $('#mkcopy').onclick = async () => { try { await navigator.clipboard.writeText(pub); toast('Ключ скопирован'); } catch (e) { $('#mailkey textarea').select(); } };
   };
-  drawKey();
-  $('#save').onclick = () => { localStorage.setItem('apiUrl', $('#url').value.trim()); localStorage.setItem('apiToken', $('#tok').value.trim()); toast('Сохранено'); };
-  $('#ping').onclick = async () => {
-    localStorage.setItem('apiUrl', $('#url').value.trim()); localStorage.setItem('apiToken', $('#tok').value.trim());
-    try { const r = await api('ping', {}); toast(`Связь есть${r.user ? ', ' + r.user : ''}`); } catch (e) { toast(e.message); }
+  if (Plan.isOwner()) drawKey();
+  $('#wipe').onclick = async () => {
+    if (!confirm('Удалить с этого телефона все профили, записи, файлы и настройки? Облачная копия, если есть, останется.')) return;
+    if (prompt('Чтобы подтвердить, напишите: удалить') !== 'удалить') return;
+    await db.delete(); localStorage.clear();
+    location.hash = '#/'; location.reload();
   };
   const ps = $('#persist');
   if (ps) ps.onclick = async () => { const ok = await navigator.storage.persist(); toast(ok ? 'Защита включена' : 'Браузер пока не разрешил'); viewSettings(); };
@@ -874,6 +883,10 @@ const routes = [
   [/^#\/emergency\/(\d+)$/, viewEmergency],
   [/^#\/summary\/(\d+)$/, viewSummary],
   [/^#\/upload/, viewUpload],
+  [/^#\/plus/, viewPlus],
+  [/^#\/faq$/, viewFaq],
+  [/^#\/tour$/, () => viewTour(true)],
+  [/^#\/legal\/(\w+)$/, id => Legal.view(id)],
   [/^#\/settings$/, viewSettings],
   [/^#\/inbox$/, viewInbox],
   [/^#\/docs\/(\d+)$/, viewDocs],
@@ -887,6 +900,10 @@ const routes = [
 ];
 async function render() {
   const hash = location.hash || '#/';
+  // первый запуск: обучение → условия → профиль. Документы и вопросы открываются и до принятия.
+  const free = /^#\/(legal|faq|tour)/.test(hash);
+  if (!free && !Tour.done && !(await db.profiles.count())) return viewTour();
+  if (!free && !Terms.accepted) return viewTerms();
   if (!hash.startsWith('#/upload') && draft && draft.stage !== 'review') draft = null;
   for (const [re, fn] of routes) {
     const m = hash.match(re);
@@ -958,7 +975,8 @@ function announceVersion() {
   await Metrics.load();
   if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
   setupUpdates();
-  Backup.init();
+  if (Plan.isPlus()) Backup.init();
   render();
+  Plan.refresh();
   announceVersion();
 })();

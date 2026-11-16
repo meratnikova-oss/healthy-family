@@ -190,3 +190,56 @@ nav.bottom a{min-width:56px}
 .pbar{height:6px;border-radius:3px;background:var(--soft);overflow:hidden}
 .pbar i{display:block;height:100%;width:0;background:var(--accent);border-radius:3px;transition:width .3s}
 [hidden]{display:none!important}
+
+/* источники загрузки: три кнопки в ряд */
+.srcrow{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.srcrow .btn{flex-direction:column;gap:4px;min-height:64px;padding:8px 4px;border-radius:16px;font-size:14px}
+
+/* Плюс */
+.plus-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:11px;background:linear-gradient(135deg,#0E6B66,#3E9C7A);color:#fff;font-size:11.5px;font-weight:700;letter-spacing:.02em;white-space:nowrap}
+.plus-teaser{display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:14px;background:var(--accent-soft);color:var(--ink);text-decoration:none;font-size:14px;font-weight:500}
+.plus-teaser span:nth-child(2){flex:1}
+.plus-card{text-decoration:none;color:inherit;border:1px solid #CFE2DF}
+.plus-list{gap:14px}
+.plus-list b{font-size:15px}
+.check{display:flex;gap:10px;align-items:flex-start;font-size:14px;line-height:1.4;cursor:pointer}
+.check input{width:20px;height:20px;margin:1px 0 0;flex:none;accent-color:var(--accent)}
+.anon-demo{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.anon-demo>div{background:var(--soft);border-radius:12px;padding:10px}
+.anon-demo p{margin:4px 0 0;font-size:12.5px;line-height:1.45}
+.anon-demo>div:last-child{background:var(--accent-soft)}
+details.sent{background:var(--soft);border-radius:12px;padding:10px 12px}
+details.sent summary{cursor:pointer;font-size:13.5px;font-weight:600;color:var(--accent)}
+details.sent pre{white-space:pre-wrap;font:12px/1.45 ui-monospace,Menlo,monospace;margin:8px 0 0;max-height:280px;overflow:auto}
+
+/* обучение при первом входе */
+.tour{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;background:var(--ground)}
+.tour-top{display:flex;justify-content:space-between;align-items:center;padding:20px 20px 0}
+.tour-brand{font-weight:700;font-size:15px;color:var(--accent)}
+.tour-track{flex:1;display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.tour-track::-webkit-scrollbar{display:none}
+.tour-slide{flex:0 0 100%;scroll-snap-align:center;display:flex;flex-direction:column;justify-content:center;padding:24px 32px;gap:14px}
+.tour-art{width:132px;height:132px;border-radius:40px;background:var(--surface);color:var(--accent);display:flex;align-items:center;justify-content:center;box-shadow:0 10px 30px rgba(14,107,102,.12);margin-bottom:12px}
+.tour-art svg{width:72px;height:72px}
+.tour-slide h1{font-size:28px}
+.tour-slide p{margin:0;font-size:16px;color:#3A404B;line-height:1.5}
+.tour-foot{padding:12px 20px calc(24px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:16px}
+.tour-dots{display:flex;gap:8px;justify-content:center}
+.tour-dots button{width:8px;height:8px;border-radius:4px;border:none;background:#CFCAC0;padding:0;cursor:pointer;transition:width .2s}
+.tour-dots button.on{width:24px;background:var(--accent)}
+
+/* вопросы и документы */
+.faq-h{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:6px 4px 0}
+.faq{gap:0;padding:4px 16px}
+.faq details{border-bottom:1px solid var(--soft)}
+.faq details:last-child{border-bottom:none}
+.faq summary{list-style:none;cursor:pointer;padding:14px 24px 14px 0;font-weight:500;position:relative}
+.faq summary::-webkit-details-marker{display:none}
+.faq summary::after{content:"+";position:absolute;right:0;top:12px;font-size:20px;color:var(--muted)}
+.faq details[open] summary::after{content:"–"}
+.faq p{margin:0 0 14px;color:#3A404B;font-size:14.5px}
+.doclink{text-decoration:none;color:var(--ink);align-items:center;min-height:40px}
+.legal{font-size:14.5px;line-height:1.55;gap:6px}
+.legal h3{font-size:15px;margin:14px 0 2px}
+.legal p,.legal ul{margin:0 0 6px}
+.legal ul{padding-left:20px}
