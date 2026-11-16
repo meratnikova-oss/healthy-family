@@ -256,3 +256,21 @@ details.sent pre{white-space:pre-wrap;font:12px/1.45 ui-monospace,Menlo,monospac
 .vrx:first-of-type{border-top:none}
 .visit details p{margin:6px 0 0;font-size:14px}
 .vrx .pill{white-space:nowrap;flex:none}
+
+/* записи по датам */
+.chips{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}
+.chips::-webkit-scrollbar{display:none}
+.chips .pill{flex:none}
+.dl-year{display:flex;flex-direction:column;gap:6px}
+.dl-year>summary{list-style:none;display:flex;justify-content:space-between;align-items:baseline;cursor:pointer;padding:6px 2px;font-size:22px;font-weight:700}
+.dl-year>summary::-webkit-details-marker{display:none}
+.dl-year>summary span:first-child::after{content:" ▾";font-size:14px;color:var(--muted)}
+.dl-year:not([open])>summary span:first-child::after{content:" ▸"}
+.dl-month{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600;margin:6px 4px 2px}
+.dl-row{display:flex;gap:12px;align-items:center;padding:10px 0;border-top:1px solid var(--soft);text-decoration:none;color:inherit}
+.dl-row:first-child{border-top:none}
+.dl-day{width:30px;flex:none;text-align:center;font-weight:700;font-size:18px;color:var(--accent)}
+.dl-title{display:block;font-weight:500}
+.dl-secs{display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:3px;font-size:12px;color:var(--muted)}
+.dl-secs i{display:inline-block;width:7px;height:7px;border-radius:4px;margin-right:4px;vertical-align:1px}
+.dl-row .tag{white-space:nowrap;flex:none}

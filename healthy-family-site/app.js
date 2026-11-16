@@ -1,4 +1,4 @@
-const APP_VERSION = '0.12.0';
+const APP_VERSION = '0.13.0';
 const app = document.getElementById('app');
 
 // ---------- утилиты ----------
@@ -301,6 +301,7 @@ async function viewSections() {
   const profiles = await spaceProfiles();
   const p = await currentProfile();
   if (!p) { app.innerHTML = `<div class="top"><h1 class="grow">Разделы</h1></div>${spaceSwitch(counts)}${emptySpace()}${nav('sections')}`; bindSpaceSwitch(); return; }
+  const byDates = localStorage.getItem('secView') === 'dates';
   const sections = (await db.sections.where('profileId').equals(p.id).toArray()).sort((a, b) => a.order - b.order);
   const counts2 = {}, flagsBy = {};
   const flags = await latestFlags(p.id);
@@ -309,10 +310,11 @@ async function viewSections() {
   const planBy = {}; for (const pl of plans) if (!planBy[pl.sectionId] || (pl.nextDate || '9') < (planBy[pl.sectionId].nextDate || '9')) planBy[pl.sectionId] = pl;
   for (const f of flags) { const m = Metrics.byId(f.metricId); const sname = m && m.section; const sid = (sections.find(s => s.name === sname) || {}).id; if (sid) flagsBy[sid] = (flagsBy[sid] || 0) + 1; }
   app.innerHTML = `
-    <div class="top"><h1 class="grow">Разделы</h1><a class="pill" href="#/sections/edit" style="text-decoration:none;color:inherit">Изменить</a></div>
+    <div class="top"><h1 class="grow">${byDates ? 'Все записи' : 'Разделы'}</h1>${byDates ? '' : '<a class="pill" href="#/sections/edit" style="text-decoration:none;color:inherit">Изменить</a>'}</div>
     ${spaceSwitch(counts)}
     ${profileChips(profiles, p)}
-    <div class="pad stack" style="gap:10px">
+    <div class="pad" style="padding-bottom:0"><div class="seg" role="tablist"><button type="button" data-sview="sections" class="${byDates ? '' : 'on'}">По разделам</button><button type="button" data-sview="dates" class="${byDates ? 'on' : ''}">По датам</button></div></div>
+    ${byDates ? `<div class="pad stack" style="gap:10px" id="datesbox"></div>` : `<div class="pad stack" style="gap:10px">
       <div class="row" style="gap:8px">
         <a class="btn ghost" href="#/emergency/${p.id}" style="flex:1;min-height:44px;font-size:13px;background:var(--high-soft);border:none;color:#8A3A1A">Экстренная карта</a>
         <a class="btn ghost" href="#/summary/${p.id}" style="flex:1;min-height:44px;font-size:13px;background:var(--accent-soft);border:none;color:var(--accent)">Сводка для врача</a>
@@ -327,9 +329,11 @@ async function viewSections() {
         </a>`; }).join('')}
       <button type="button" class="tile" id="addsec" style="border:1.5px dashed #9AA0AA;background:transparent;cursor:pointer;justify-content:center;align-items:center">+ Свой раздел</button>
       </div>
-    </div>
+    </div>`}
     ${nav('sections')}`;
   bindProfileChips(); bindSpaceSwitch();
+  $$('[data-sview]').forEach(b => b.onclick = () => { localStorage.setItem('secView', b.dataset.sview); viewSections(); });
+  if (byDates) { await datesView(p, $('#datesbox')); return; }
   $('#addsec').onclick = async () => {
     const name = prompt('Название раздела');
     if (!name || !name.trim()) return;
@@ -442,13 +446,14 @@ async function viewSection(id, tab = 'timeline') {
     ${nav('sections')}`;
   const box = $('#stab');
   if (tab === 'timeline') {
-    box.innerHTML = records.length ? records.map(r => `
+    let lastY = null;
+    box.innerHTML = records.length ? records.map(r => { const y = (r.date || '').slice(0, 4) || 'Без даты'; const head = y !== lastY ? `<div class="dl-month" style="margin:${lastY ? 10 : 0}px 0 4px">${y}</div>` : ''; lastY = y; return head + `
       <div class="tl"><div class="rail"><i style="background:${s.color}"></i><b></b></div>
         <a href="#/record/${r.id}">
           <div class="between"><span class="tag kind">${esc(RECORD_TYPES[r.type] || 'Документ')}</span><span class="sub">${fmtDate(r.date)}</span></div>
           <span style="font-weight:500">${esc(r.title || RECORD_TYPES[r.type])}</span>
           <span class="sub">${esc([nm(doctors, r.doctorId), nm(clinics, r.clinicId)].filter(Boolean).join(' · '))}</span>
-        </a></div>`).join('') : '<div class="card"><p class="empty">В разделе пока нет записей.</p></div>';
+        </a></div>`; }).join('') : '<div class="card"><p class="empty">В разделе пока нет записей.</p></div>';
   } else if (tab === 'metrics') {
     const recIds = new Set(records.map(r => r.id));
     const res = (await db.results.where('profileId').equals(p.id).toArray()).filter(r => recIds.has(r.recordId));
