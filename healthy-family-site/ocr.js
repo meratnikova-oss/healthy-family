@@ -8,7 +8,7 @@ const LocalOCR = (() => {
     return new Promise((res, rej) => {
       if (document.querySelector(`script[data-src="${src}"]`)) return res();
       const s = document.createElement('script'); s.src = src; s.dataset.src = src;
-      s.onload = res; s.onerror = () => rej(new Error('Не удалось загрузить распознавание — проверьте интернет'));
+      s.onload = res; s.onerror = () => rej(new Error('Не удалось загрузить распознавание — проверьте интернет. Если включён VPN, выключите его.'));
       document.head.appendChild(s);
     });
   }

@@ -37,6 +37,14 @@ db.version(4).stores({
   cycles:    '++id, profileId, start'         // {profileId, start, end}
 });
 
+// v5: рецепты врача (бланки и электронные) со сроком действия; фото рецепта — в files с rxId.
+// У лекарства появилось поле toBuy (список «Купить»), у записи приёма — visit {complaints, diagnosis, prescriptions[], recommendations[], referrals[], nextVisit}.
+// У файла — hash (SHA-256), чтобы находить одинаковые документы.
+db.version(5).stores({
+  rx:    '++id, profileId, validTo',   // {profileId, drug, dose, qty, kind, issued, validTo, number, doctor, clinic, note, used, medId, recordId, createdAt}
+  files: '++id, recordId, docId, rxId, size'
+});
+
 const DEFAULT_SECTIONS = {
   adult_f: ['Анализы крови', 'Гинекология', 'Эндокринология', 'Кардиология', 'ЛОР', 'Офтальмология', 'Стоматология', 'Неврология', 'Опорно-двигательная система', 'Дерматология', 'Прочее'],
   adult_m: ['Анализы крови', 'Урология', 'Эндокринология', 'Кардиология', 'ЛОР', 'Офтальмология', 'Стоматология', 'Неврология', 'Опорно-двигательная система', 'Дерматология', 'Прочее'],
@@ -60,9 +68,11 @@ async function deleteProfile(id) {
     for (const r of recIds) await db.files.where('recordId').equals(r).delete();
     const docIds = await db.idDocs.where('profileId').equals(id).primaryKeys();
     for (const d of docIds) await db.files.where('docId').equals(d).delete();
+    const rxIds = await db.rx.where('profileId').equals(id).primaryKeys();
+    for (const x of rxIds) await db.files.where('rxId').equals(x).delete();
     const medIds = await db.meds.where('profileId').equals(id).primaryKeys();
     for (const m of medIds) await db.medLogs.where('medId').equals(m).delete();
-    for (const t of ['records', 'results', 'sections', 'history', 'idDocs', 'meds', 'vaccines', 'reminders', 'plans', 'cycles'])
+    for (const t of ['records', 'results', 'sections', 'history', 'idDocs', 'meds', 'vaccines', 'reminders', 'plans', 'cycles', 'rx'])
       await db[t].where('profileId').equals(id).delete();
     await db.profiles.delete(id);
   });

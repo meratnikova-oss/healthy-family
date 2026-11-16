@@ -192,7 +192,7 @@ async function readPages(files, onProgress) {
         job.b.text = cloud ? ((await api('ocr', { image: img })).text || '')
           : await LocalOCR.recognize(img, m => { if (m.status === 'recognizing text') onProgress(`Распознаю страницу ${done + 1} из ${jobs.length} на телефоне — ${Math.round((m.progress || 0) * 100)}%`, (done + (m.progress || 0)) / jobs.length); });
       } catch (e) {
-        if (e.status || /Не удалось загрузить распознавание|Нет связи|адрес сервера/.test(e.message)) throw e;
+        if (e.status || /Не удалось загрузить распознавание|Нет связи|адрес сервера|VPN/.test(e.message)) throw e;
         failed++; job.b.text = '';
       }
       done++;
@@ -257,7 +257,9 @@ async function parseChunks(chunks, p, onProgress) {
 }
 
 function mergeParsed(list) {
-  const out = { docType: null, title: '', date: null, clinic: '', doctor: '', patientName: '', conclusion: '', sectionHints: [], results: [], uncertain: [], truncated: false };
+  const out = { docType: null, title: '', date: null, clinic: '', doctor: '', patientName: '', conclusion: '', sectionHints: [], results: [], uncertain: [], truncated: false,
+    visit: { complaints: '', anamnesis: '', exam: '', diagnosis: '', icd: '', prescriptions: [], recommendations: [], referrals: [], nextVisit: null } };
+  const join = (a, b) => !b ? a : !a ? b : a.includes(b) ? a : a + '\n' + b;
   const seen = new Set();
   for (const pz of list) {
     if (!pz) continue;
@@ -267,6 +269,14 @@ function mergeParsed(list) {
     out.sectionHints = [...new Set([...out.sectionHints, ...(pz.sectionHints || [])])];
     out.uncertain = [...new Set([...out.uncertain, ...(pz.uncertain || [])])];
     out.truncated = out.truncated || !!pz.truncated;
+    const v = pz.visit, ov = out.visit;
+    if (v) {
+      for (const k of ['complaints', 'anamnesis', 'exam', 'diagnosis']) ov[k] = join(ov[k], String(v[k] || '').trim());
+      if (!ov.icd && v.icd) ov.icd = v.icd;
+      if (!ov.nextVisit && v.nextVisit) ov.nextVisit = v.nextVisit;
+      for (const x of v.prescriptions || []) if (x && x.drug && !ov.prescriptions.some(y => y.drug.toLowerCase() === String(x.drug).toLowerCase())) ov.prescriptions.push(x);
+      for (const k of ['recommendations', 'referrals']) for (const x of v[k] || []) if (x && !ov[k].includes(x)) ov[k].push(x);
+    }
     for (const r of pz.results || []) {
       const key = [r.name, r.value, r.unit].map(x => String(x ?? '').toLowerCase().trim()).join('|');
       if (seen.has(key)) continue;
@@ -379,6 +389,7 @@ async function viewReview() {
         <datalist id="dlist">${doctors.map(c => `<option value="${esc(c.name)}">`).join('')}</datalist>
         <label class="f">Заключение<textarea class="in" name="conclusion">${esc(pz.conclusion || '')}</textarea></label>
       </section>
+      ${visitEditor(pz.visit, hasVisit(pz.visit) || VISIT_TYPES.has(pz.docType))}
       <section class="card"><h2>Разделы</h2>
         <div class="row" style="flex-wrap:wrap;gap:8px">${sections.map(s => `<label class="pill ${pre.has(s.id) ? 'on' : ''}"><input type="checkbox" name="sec" value="${s.id}" ${pre.has(s.id) ? 'checked' : ''} hidden>${esc(s.name)}</label>`).join('')}</div>
       </section>
@@ -390,6 +401,7 @@ async function viewReview() {
       ${q ? `<button type="button" class="btn ghost" id="skip">${last ? 'Пропустить и закончить' : 'Пропустить этот документ'}</button>` : ''}
     </form>`;
   drawRows(p);
+  bindVisitEditor($('#rev select[name=type]'));
   $$('label.pill input[name=sec]').forEach(i => i.onchange = () => i.parentElement.classList.toggle('on', i.checked));
   $$('[data-open]').forEach(b => b.onclick = () => { const f = d.files[+b.dataset.open]; const u = URL.createObjectURL(f); window.open(u, '_blank'); setTimeout(() => URL.revokeObjectURL(u), 60000); });
   $('#addrow').onclick = () => { syncRows(); d.rows.push({ name: '', value: '', unit: '', refLow: '', refHigh: '' }); drawRows(p); };
@@ -421,15 +433,23 @@ async function saveDraft(fd) {
     if (other) sectionIds.push(other.id);
   }
   const date = fd.get('date') || null;
+  // тот же файл уже есть в архиве?
+  const twin = d.files.length ? await findSameFile(d.files).catch(() => null) : null;
+  if (twin && !confirm(`Такой документ уже есть: «${twin.title || RECORD_TYPES[twin.type] || 'Документ'}» от ${fmtDate(twin.date)}. Всё равно сохранить ещё раз?`)) {
+    if (d.queue) { nextInQueue(); return; }
+    draft = null; trayClear(); location.hash = '#/record/' + twin.id; return;
+  }
+  const visit = readVisit(fd);
   const clinicId = await getOrCreateByName(db.clinics, fd.get('clinic'));
   const doctorId = await getOrCreateByName(db.doctors, fd.get('doctor'));
   const unknown = [];
+  let recordId;
   await db.transaction('rw', db.records, db.files, db.results, async () => {
-    const recordId = await db.records.add({
+    recordId = await db.records.add({
       profileId: p.id, date, type: fd.get('type'), title: fd.get('title').trim(), clinicId, doctorId, sectionIds,
       conclusion: (fd.get('conclusion') || '').trim(), text: d.text || '', notes: '', explanation: null, createdAt: new Date().toISOString()
     });
-    for (const f of d.files) await db.files.add({ recordId, name: f.name, mime: f.type, size: f.size, blob: f });
+    for (const f of d.files) await db.files.add({ recordId, name: f.name, mime: f.type, size: f.size, blob: f, hash: f._hash || null });
     const rows = d.rows.filter(r => String(r.name).trim() && String(r.value).trim());
     for (const r of rows) {
       const n = Metrics.normalizeResult(r, p);
@@ -437,6 +457,8 @@ async function saveDraft(fd) {
       await db.results.add({ recordId, profileId: p.id, date, ...n });
     }
   });
+  const added = await applyVisit(p.id, recordId, visit, fd.get('doctor'), date);
+  if (added) toast(`Назначения добавлены в лекарства: ${added}`);
   if (unknown.length) {
     const kv = (await db.kv.get('unknownMetrics')) || { key: 'unknownMetrics', value: [] };
     kv.value = [...new Set([...kv.value, ...unknown])];

@@ -1,4 +1,4 @@
-const APP_VERSION = '0.9.0';
+const APP_VERSION = '0.10.0';
 const app = document.getElementById('app');
 
 // ---------- утилиты ----------
@@ -8,6 +8,7 @@ const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
 const fmtDate = d => { if (!d) return 'без даты'; const [y, m, dd] = d.split('-'); return `${+dd} ${MONTHS[+m - 1]} ${y}`; };
 const fmtNum = n => n === null || n === undefined ? '' : String(n).replace('.', ',');
+const MEDCARD_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M12 8v6M9 11h6M8 17h8"/></svg>';
 const RECORD_TYPES = { analysis: 'Анализ', ultrasound: 'УЗИ', imaging: 'Снимок / МРТ / КТ', visit: 'Приём врача', procedure: 'Процедура', document: 'Документ' };
 const STATUS_TEXT = { low: '↓ Ниже референса', high: '↑ Выше референса', normal: 'В норме' };
 
@@ -33,7 +34,7 @@ async function api(action, payload) {
     headers: { 'Content-Type': 'text/plain;charset=UTF-8' }, // простой запрос: браузер не делает предварительную проверку
     body: JSON.stringify({ action, ...payload, code: settings.apiToken })
   }); } catch (e) {
-    throw new Error('Нет связи с сервером распознавания. Проверьте интернет, адрес сервера и переменную ALLOWED_ORIGIN у функции.');
+    throw new Error('Нет связи с сервером. Если включён VPN — выключите его: с VPN телефон часто не достаёт до серверов в России. Если не помогло, проверьте интернет.');
   }
   const data = await r.json().catch(() => ({}));
   const fail = msg => Object.assign(new Error(msg), { status: r.status, until: data.until });
@@ -224,15 +225,14 @@ async function viewHome() {
   }
   const pet = p.kind === 'pet';
   const flags = await latestFlags(p.id);
-  const recent = (await db.records.where('profileId').equals(p.id).toArray()).sort((x, y) => (y.date || '').localeCompare(x.date || ''));
-  const sections = await db.sections.where('profileId').equals(p.id).toArray();
-  const secName = id => (sections.find(s => s.id === id) || {}).name || '';
-  const upcoming = (await homeEvents(profiles, 60)).slice(0, 5);
+  // цикл на главной — только у того, чей это профиль, а не у всей семьи
+  const upcoming = (await homeEvents(profiles, 60)).filter(e => e.kind !== 'cycle' || e.profileId === p.id).slice(0, 5);
+  const toBuy = await buyList(p.id);
   const today = await todayMeds(p);
   const kindLabel = pet ? [p.species, p.breed].filter(Boolean).join(' · ') || 'Питомец' : p.kind === 'child' ? 'Ребёнок' : 'Профиль';
   app.innerHTML = `
     <div class="top"><div class="grow"><div class="sub">${esc(kindLabel)}</div><h1>${esc(p.name)}</h1></div>
-      <a class="pill" href="#/profile/${p.id}" style="text-decoration:none;color:inherit">Профиль</a></div>
+      <a class="pill medcard" href="#/profile/${p.id}">${MEDCARD_ICON}Медкарта</a></div>
     ${spaceSwitch(counts)}
     ${profileChips(profiles, p)}
     <div class="pad stack">
@@ -257,20 +257,14 @@ async function viewHome() {
             <span class="grow">${esc(t.med.name)}${t.med.dose ? ' · ' + esc(t.med.dose) : ''}</span><span class="sub">${esc(t.time)}</span></label>`).join('')
           : `<p class="empty" style="margin:0">На сегодня ничего. <a href="#/med/new/${p.id}">Добавить лекарство</a></p>`}
       </section>
-      <section class="card">
-        <div class="between"><h2>Последние записи</h2><a href="#/sections" style="font-size:13px;text-decoration:none">Все разделы</a></div>
-        ${recent.length ? recent.slice(0, 5).map(r => `
-          <a class="row" href="#/record/${r.id}" style="text-decoration:none;color:inherit">
-            <div class="grow"><div style="font-weight:500">${esc(r.title || RECORD_TYPES[r.type])}</div>
-              <div class="sub">${fmtDate(r.date)} · ${esc((r.sectionIds || []).map(secName).filter(Boolean).join(', '))}</div></div>
-            <span class="tag kind">${esc(RECORD_TYPES[r.type] || 'Документ')}</span>
-          </a>`).join('') : '<p class="empty" style="margin:0">Загрузите первый анализ или документ — кнопка внизу справа.</p>'}
-      </section>
+      ${buyCard(toBuy, p.id)}
+      <a class="card" href="#/sections" style="text-decoration:none;color:inherit;flex-direction:row;align-items:center"><span class="grow"><b>Все документы — в разделах</b><br><span class="sub">Анализы, УЗИ, приёмы по специальностям</span></span><span aria-hidden="true">›</span></a>
     </div>
     <a class="fab" href="#/upload">+ Загрузить</a>
     ${nav('home')}`;
   bindProfileChips(); bindSpaceSwitch();
   $$('[data-take]').forEach(c => c.onchange = async () => { const [m, t] = c.dataset.take.split('|'); await toggleTaken(+m, t, c.checked); });
+  bindBuyCard(() => viewHome());
   if (!Install.standalone) { $('.pad.stack').insertAdjacentHTML('afterbegin', Install.card()); Install.bind(); }
   expiringDocs().then(async docs => {
     if (!docs.length || !$('.pad.stack')) return;
@@ -528,6 +522,7 @@ async function viewRecord(id, tab = 'results') {
         <div><div class="sub">Врач</div><div style="font-weight:500">${esc(doctor?.name || '—')}</div></div>
         <div><div class="sub">Вне референса</div><div style="font-weight:500">${results.length ? flagged : '—'}</div></div>
       </section>
+      ${visitView(r)}
       <section class="stack" style="gap:8px">
         ${files.length ? `<span class="sub">Оригинал${files.length > 1 ? ` · ${files.length} ${plural(files.length, 'файл', 'файла', 'файлов')}` : ''}</span>${originalThumbs(files)}` : '<span class="sub">Оригинала нет — запись заполнена вручную.</span>'}
       </section>
@@ -573,6 +568,7 @@ async function viewRecord(id, tab = 'results') {
   }
   $$('[data-tab]').forEach(b => b.onclick = () => viewRecord(id, b.dataset.tab));
   bindOriginals();
+  if (r.visit) bindVisitView(r, () => viewRecord(id, tab));
   $('#del').onclick = async () => {
     if (!confirm('Удалить запись вместе с файлами и показателями?')) return;
     await deleteRecord(r.id);
@@ -606,6 +602,7 @@ async function viewRecordEdit(id) {
         <datalist id="dlist">${doctors.map(c => `<option value="${esc(c.name)}">`).join('')}</datalist>
         <label class="f">Заключение<textarea class="in" name="conclusion">${esc(r.conclusion || '')}</textarea></label>
       </section>
+      ${visitEditor(r.visit, hasVisit(r.visit) || VISIT_TYPES.has(r.type))}
       <section class="card"><h2>Разделы</h2>
         <span class="sub" style="margin-top:-6px">Отметьте один или несколько. Снимите отметку, чтобы убрать запись из раздела.</span>
         <div class="row" style="flex-wrap:wrap;gap:8px">${sections.map(s => `<label class="pill ${chosen.has(s.id) ? 'on' : ''}"><input type="checkbox" name="sec" value="${s.id}" ${chosen.has(s.id) ? 'checked' : ''} hidden>${esc(s.name)}</label>`).join('')}</div>
@@ -617,6 +614,7 @@ async function viewRecordEdit(id) {
       <button class="btn" type="submit">Сохранить изменения</button>
     </form>`;
   drawRows(p);
+  bindVisitEditor($('#ref select[name=type]'));
   $$('label.pill input[name=sec]').forEach(i => i.onchange = () => i.parentElement.classList.toggle('on', i.checked));
   $('#addrow').onclick = () => { syncRows(); draft.rows.push({ name: '', value: '', unit: '', refLow: '', refHigh: '' }); drawRows(p); };
   $('#ref').onsubmit = async e => {
@@ -633,6 +631,9 @@ async function viewRecordEdit(id) {
       for (const row of draft.rows.filter(x => String(x.name).trim() && String(x.value).trim()))
         await db.results.add({ recordId: r.id, profileId: p.id, date, ...Metrics.normalizeResult(row, p) });
     });
+    const visit = readVisit(fd);
+    if (visit && r.visit?.reminderId) visit.reminderId = r.visit.reminderId;
+    if (visit) await applyVisit(p.id, r.id, visit, fd.get('doctor'), date); else if (r.visit) await db.records.update(r.id, { visit: null });
     draft = null;
     toast('Сохранено');
     location.hash = '#/record/' + r.id;
@@ -794,6 +795,7 @@ async function viewSettings() {
         <div class="between"><span>Защита от автоочистки</span><span class="tag ${persisted ? 'normal' : 'high'}">${persisted ? 'Включена' : 'Не включена'}</span></div>
         ${persisted ? '' : '<button type="button" class="btn ghost" id="persist">Включить защиту</button><span class="sub">Если браузер не разрешает — установите приложение на главный экран и попробуйте снова.</span>'}
         <button type="button" class="btn ghost" id="export">Скачать весь архив одним файлом</button>
+        <a class="btn ghost" href="#/dupes">Найти одинаковые документы</a>
         <label class="btn ghost" style="cursor:pointer">Восстановить из файла<input type="file" id="import" accept=".json,application/json" hidden></label>
         <span class="sub">Файл архива — дополнительная страховка к облачной копии. Он не зашифрован, поэтому храните его в надёжном месте.</span>
       </section>
@@ -884,6 +886,10 @@ const routes = [
   [/^#\/summary\/(\d+)$/, viewSummary],
   [/^#\/upload/, viewUpload],
   [/^#\/plus/, viewPlus],
+  [/^#\/dupes$/, viewDupes],
+  [/^#\/rx-list\/(\d+)$/, viewRx],
+  [/^#\/rx\/new\/(\d+)$/, id => viewRxForm('new', id)],
+  [/^#\/rx\/(\d+)$/, id => viewRxForm('edit', id)],
   [/^#\/faq$/, viewFaq],
   [/^#\/tour$/, () => viewTour(true)],
   [/^#\/legal\/(\w+)$/, id => Legal.view(id)],

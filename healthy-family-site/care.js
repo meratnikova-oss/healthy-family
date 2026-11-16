@@ -161,17 +161,19 @@ async function viewMeds(profileId) {
   const meds = await db.meds.where('profileId').equals(p.id).toArray();
   const t = todayISO();
   const active = meds.filter(m => m.active !== false && (!medEndDate(m) || medEndDate(m) >= t));
-  const past = meds.filter(m => !active.includes(m));
+  const past = meds.filter(m => !active.includes(m) && !(m.active === false && m.toBuy));
   const card = m => { const pr = medProgress(m); return `<a class="card" href="#/med/${m.id}" style="text-decoration:none;color:inherit;gap:8px">
       <div class="between"><span style="font-weight:600">${esc(m.name)}${m.dose ? ' · ' + esc(m.dose) : ''}</span><span class="sub">${esc(medTimes(m).join(', '))}</span></div>
       <div style="height:6px;border-radius:3px;background:var(--soft);overflow:hidden"><div style="height:100%;width:${pr.pct}%;background:${pr.low ? 'var(--high)' : 'var(--accent)'}"></div></div>
       <span class="sub" style="${pr.low ? 'color:var(--high);font-weight:600' : ''}">${esc(pr.text)}</span></a>`; };
   app.innerHTML = `<div class="top">${backLink('#/profile/' + p.id)}<div class="grow"><div class="sub">${esc(p.name)}</div><h1>Лекарства</h1></div></div>
     <div class="pad stack">
+      ${buyCard(meds.filter(m => m.toBuy), p.id)}
       ${active.length ? active.map(card).join('') : '<div class="card"><p class="empty" style="margin:0">Добавьте лекарство или добавку — приложение покажет, что принять сегодня, и предупредит, когда пора купить.</p></div>'}
       <a class="btn" href="#/med/new/${p.id}">Добавить лекарство</a>
       ${past.length ? `<h2 style="margin-top:8px">Завершённые</h2>${past.map(card).join('')}` : ''}
     </div>${nav('')}`;
+  bindBuyCard(() => viewMeds(profileId));
 }
 
 async function viewMedForm(mode, arg) {
@@ -192,6 +194,7 @@ async function viewMedForm(mode, arg) {
           <label class="f">Штук за приём<input class="in" name="perDose" inputmode="decimal" value="${esc(m.perDose ?? 1)}"></label>
         </div>
         <label class="f">Заметка<textarea class="in" name="note" placeholder="Кто назначил, до или после еды, с чем не сочетать">${esc(m.note || '')}</textarea></label>
+        <label class="check"><input type="checkbox" name="tobuy" ${m.toBuy ? 'checked' : ''}> <span>В список «Купить»</span></label>
       </section>
       <button class="btn" type="submit">Сохранить</button>
       ${isNew ? '' : `<button type="button" class="btn ghost" id="mics">Добавить напоминания в календарь телефона</button>
@@ -202,7 +205,7 @@ async function viewMedForm(mode, arg) {
     e.preventDefault();
     const f = e.target, num = v => (String(v).trim() === '' ? null : +String(v).replace(',', '.'));
     const times = f.times.value.split(/[,;\s]+/).map(x => x.trim()).filter(x => /^\d{1,2}[:.]\d{2}$/.test(x)).map(x => x.replace('.', ':').padStart(5, '0'));
-    const data = { profileId: p.id, name: f.name.value.trim(), dose: f.dose.value.trim(), times, start: f.start.value || todayISO(), days: num(f.days.value), stock: num(f.stock.value), perDose: num(f.perDose.value) || 1, note: f.note.value.trim(), active: m.active !== false };
+    const data = { profileId: p.id, name: f.name.value.trim(), dose: f.dose.value.trim(), times, start: f.start.value || todayISO(), days: num(f.days.value), stock: num(f.stock.value), perDose: num(f.perDose.value) || 1, note: f.note.value.trim(), active: m.active !== false, toBuy: f.tobuy.checked };
     if (isNew) await db.meds.add(data); else await db.meds.update(m.id, data);
     toast('Сохранено'); location.hash = '#/meds/' + p.id;
   };
@@ -350,7 +353,7 @@ function reminderDialog(profileId, metricId, name) {
 }
 
 // ---------- события для календаря и «Ближайшего» ----------
-const EVENT_KINDS = { vaccine: ['Прививка', '#8A3A1A', '#F1E9E4'], treatment: ['Обработка', '#6E5A1A', '#F4EEDC'], plan: ['Осмотр', '#0E6B66', '#E6F0EF'], retest: ['Анализ', '#2457A6', '#E3EBF7'], med: ['Лекарства', '#6B4FA0', '#EEE8F7'], cycle: ['Цикл', '#B5547F', '#F3E4EC'] };
+const EVENT_KINDS = { vaccine: ['Прививка', '#8A3A1A', '#F1E9E4'], treatment: ['Обработка', '#6E5A1A', '#F4EEDC'], plan: ['Осмотр', '#0E6B66', '#E6F0EF'], retest: ['Анализ', '#2457A6', '#E3EBF7'], med: ['Лекарства', '#6B4FA0', '#EEE8F7'], cycle: ['Цикл', '#B5547F', '#F3E4EC'], rx: ['Рецепт', '#8A5A1A', '#F6ECDD'] };
 async function collectEvents(profiles, from, to) {
   const ids = new Set(profiles.map(p => p.id)), name = Object.fromEntries(profiles.map(p => [p.id, p.name]));
   const ev = [];
@@ -376,7 +379,8 @@ async function collectEvents(profiles, from, to) {
     const left = medStockDays(m);
     if (left !== null && left <= 5 && medActiveOn(m, todayISO())) { const d = todayISO(); if (d >= from && d <= to) ev.push({ date: d, kind: 'med', title: `Купить: ${m.name}`, sub: `${name[m.profileId]} · осталось ${m.stock} шт`, href: '#/med/' + m.id, profileId: m.profileId }); }
   }
-  if (typeof cycleEvents === 'function') for (const p of profiles) if (isFemale(p)) ev.push(...(await cycleEvents(p, from, to)));
+  if (typeof cycleEvents === 'function') for (const p of profiles) if (isFemale(p) && p.kind === 'adult') ev.push(...(await cycleEvents(p, from, to)));
+  if (typeof rxEvents === 'function') ev.push(...(await rxEvents(profiles, from, to)));
   return ev.sort((a, b) => a.date.localeCompare(b.date));
 }
 async function upcomingEvents(profiles, days) {
@@ -411,7 +415,7 @@ async function viewCalendar() {
   const [y, m] = ym.split('-').map(Number);
   const nDaysM = new Date(y, m, 0).getDate();
   const first = `${ym}-01`, last = `${ym}-${String(nDaysM).padStart(2, '0')}`;
-  const hasFemale = profiles.some(isFemale);
+  const hasFemale = profiles.some(x => isFemale(x) && x.kind === 'adult');
   const pass = e => (filter === 'all' && !e.private) || (filter === 'tests' && (e.kind === 'plan' || e.kind === 'retest')) || (filter === 'vac' && (e.kind === 'vaccine' || e.kind === 'treatment')) || (filter === 'med' && e.kind === 'med') || (filter === 'cycle' && e.kind === 'cycle');
   const monthEv = (await collectEvents(profiles, first, last)).filter(pass);
   const byDay = {}; monthEv.forEach(e => (byDay[e.date] = byDay[e.date] || []).push(e));

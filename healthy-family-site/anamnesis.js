@@ -162,13 +162,14 @@ async function viewProfile(id) {
   const preg = all.filter(h => h.kind === 'pregnancy');
   const births = preg.filter(h => h.outcome === 'birth' || h.outcome === 'cesarean').length;
   app.innerHTML = `
-    <div class="top">${backLink('#/')}<div class="grow"><div class="sub">${p.kind === 'pet' ? esc([p.species, p.breed].filter(Boolean).join(' · ') || 'Питомец') : 'Профиль и анамнез'}</div><h1>${esc(p.name)}</h1></div>
+    <div class="top">${backLink('#/')}<div class="grow"><div class="sub">${p.kind === 'pet' ? esc([p.species, p.breed].filter(Boolean).join(' · ') || 'Питомец') : 'Медкарта'}</div><h1>${esc(p.name)}</h1></div>
       <a class="pill" href="#/profile/edit/${p.id}" style="text-decoration:none;color:inherit">Изменить</a></div>
     <div class="pad stack">
       <div class="grid2">
         <a class="tile" href="#/meds/${p.id}"><span style="font-weight:600">Лекарства</span><span class="sub">Курсы и приём</span></a>
+        <a class="tile" href="#/rx-list/${p.id}"><span style="font-weight:600">Рецепты</span><span class="sub">Срок действия, фото</span></a>
         <a class="tile" href="#/vaccines/${p.id}"><span style="font-weight:600">Прививки</span><span class="sub">${p.kind === 'pet' ? 'И обработки' : 'Нацкалендарь РФ'}</span></a>
-        ${isFemale(p) ? `<a class="tile" href="#/cycle/${p.id}"><span style="font-weight:600">Цикл</span><span class="sub">Календарь месячных</span></a>` : ''}
+        ${isFemale(p) && p.kind === 'adult' ? `<a class="tile" href="#/cycle/${p.id}"><span style="font-weight:600">Цикл</span><span class="sub">Календарь месячных</span></a>` : ''}
         ${p.kind !== 'pet' ? `<a class="tile" href="#/pollen/${p.id}"><span style="font-weight:600">Пыльца</span><span class="sub">Сезоны цветения</span></a>` : ''}
         <a class="tile" href="#/emergency/${p.id}"><span style="font-weight:600">Экстренная карта</span><span class="sub">Показать в один тап</span></a>
         <a class="tile" href="#/summary/${p.id}"><span style="font-weight:600">Сводка для врача</span><span class="sub">Для печати или PDF</span></a>
